@@ -1,0 +1,9 @@
+{
+  "imports": {
+    "oak": "https://deno.land/x/oak/mod.ts",
+    "croner": "https://deno.land/x/croner@6.0.3/dist/croner.js"
+  },
+  "tasks": {
+    "start": "deno run --allow-net --allow-env --allow-read --allow-write main.ts"
+  }
+}

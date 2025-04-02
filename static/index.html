@@ -1,0 +1,1784 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub action 任务管理</title>
+    <!-- 添加 favicon -->
+    <link rel="icon" type="image/svg+xml" href="https://imgur.ygr.me/file/1733245406661_githubactions-original.svg">
+    <style>
+        /* 整体布局 */
+        body {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f8fafc;
+            color: #1a202c;
+            line-height: 1.5;
+        }
+
+        /* 标题和按钮样式 */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .header h1 {
+            margin: 0;
+            padding: 0;
+            border: none;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .action-button {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+        }
+
+        .action-button .icon {
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .add-button {
+            background: linear-gradient(135deg, #4299e1, #3182ce);
+            color: white;
+        }
+
+        .add-button:hover {
+            background: linear-gradient(135deg, #3182ce, #2c5282);
+            transform: translateY(-1px);
+        }
+
+        .delete-button {
+            background: linear-gradient(135deg, #fc8181, #e53e3e);
+            color: white;
+        }
+
+        .delete-button:hover {
+            background: linear-gradient(135deg, #e53e3e, #c53030);
+            transform: translateY(-1px);
+        }
+
+        /* 任务列表样式 */
+        .task-list {
+            display: grid;
+            gap: 24px;
+            grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+            margin: 0 auto 40px;
+            padding: 0 20px;
+        }
+
+        /* 任务卡片样式 */
+        .task-item {
+            background: white;
+            border-radius: 16px;
+            padding: 20px 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            transition: all 0.3s ease;
+            border: 1px solid rgba(0, 0, 0, 0.05);
+        }
+
+        .task-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        .task-item h3 {
+            text-align: center;
+            font-size: 20px;
+            font-weight: 600;
+            color: #2D3748;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #edf2f7;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: text;
+        }
+
+        /* 任务信息布局 */
+        .task-info {
+            display: grid;
+            gap: 18px;
+            padding: 16px 16px;
+        }
+
+        .task-info p {
+            display: grid;
+            grid-template-columns: 100px 1fr;
+            gap: 16px;
+            margin: 0;
+            align-items: center;
+        }
+
+        .task-info strong {
+            color: #718096;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        /* 修改任务信息布局和文本溢出 */
+        .task-info p span {
+            font-size: 16px;
+            font-weight: 500;
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        /* 状态区域样式 */
+        .task-status {
+            background: #f7fafc;
+            border-radius: 12px;
+            padding: 16px 16px;
+            margin: 20px 0;
+            border: 1px solid #edf2f7;
+            min-height: 160px;
+            display: grid;
+            grid-template-rows: auto auto auto 36px;
+            /* 为取消按钮预留固定空间 */
+            /* gap: 10px;  添加行间距 */
+        }
+
+        .task-status p {
+            margin: 0;
+            /* 移除段落的默认边距 */
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            color: #4a5568;
+        }
+
+        /* 修改取消按钮容器样式 */
+        .cancel-btn-container {
+            margin-top: 16px;
+            text-align: center;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+            align-self: end;
+            /* 底部对齐 */
+        }
+
+        .cancel-btn-container.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* 修改取消按钮样式 */
+        .cancel-btn-container button {
+            width: 100%;
+            background: #fff5f5;
+            border: 1px solid #feb2b2;
+            color: #c53030;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            padding: 8px 16px;
+        }
+
+        .cancel-btn-container button:hover {
+            background: #fed7d7;
+            border-color: #fc8181;
+        }
+
+        /* 状态标签样式 */
+        .status-result {
+            font-weight: 500;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            display: inline-block;
+            min-width: 80px;
+            text-align: center;
+        }
+
+        .status-result.success {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+
+        .status-result.failure {
+            background: #fed7d7;
+            color: #822727;
+        }
+
+        .status-result.running {
+            background: #bee3f8;
+            color: #2a4365;
+        }
+
+        .status-result.waiting {
+            background: #edf2f7;
+            color: #2d3748;
+        }
+
+        .status-result.cancelled {
+            background: #feebc8;
+            color: #744210;
+        }
+
+        /* 按钮组样式 */
+        .button-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 28px;
+            justify-content: flex-end;
+        }
+
+        button {
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            min-width: 100px;
+            cursor: pointer;
+        }
+
+        /* 主按钮样式 */
+        button[type="submit"] {
+            background: #4299e1;
+            color: white;
+            border: none;
+        }
+
+        button[type="submit"]:hover {
+            background: #3182ce;
+            transform: translateY(-1px);
+        }
+
+        /* 次要按钮样式 */
+        .btn-default {
+            background: white;
+            border: 1px solid #e2e8f0;
+            color: #4a5568;
+        }
+
+        .btn-default:hover {
+            background: #f7fafc;
+            border-color: #cbd5e0;
+            transform: translateY(-1px);
+        }
+
+        /* 任务操作按钮 */
+        .task-actions {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-top: 24px;
+        }
+
+        .task-actions button {
+            padding: 8px 16px;
+            font-size: 14px;
+            border-radius: 6px;
+            min-width: 80px;
+        }
+
+        /* 编辑按钮 */
+        button[onclick*="editTask"] {
+            background: white;
+            border: 1px solid #e2e8f0;
+            color: #4a5568;
+        }
+
+        button[onclick*="editTask"]:hover {
+            background: #f7fafc;
+            border-color: #cbd5e0;
+        }
+
+        /* 删除按钮 */
+        button[onclick*="deleteTask"] {
+            background: #fff5f5;
+            border: 1px solid #feb2b2;
+            color: #c53030;
+        }
+
+        button[onclick*="deleteTask"]:hover {
+            background: #fed7d7;
+            border-color: #fc8181;
+        }
+
+        /* 执行按钮 */
+        button[onclick*="runTask"] {
+            background: #ebf8ff;
+            border: 1px solid #90cdf4;
+            color: #2b6cb0;
+        }
+
+        button[onclick*="runTask"]:hover {
+            background: #bee3f8;
+            border-color: #63b3ed;
+        }
+
+        /* 表单容器 */
+        .floating-form-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .floating-form-container.active {
+            display: flex;
+        }
+
+        .floating-form {
+            background: white;
+            padding: 32px;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+            animation: slideUp 0.3s ease;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 表单组样式 */
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #2d3748;
+            font-size: 14px;
+        }
+
+        .form-group label[for]::after {
+            content: ' *';
+            color: #e53e3e;
+        }
+
+        .form-group.no-required label[for]::after {
+            content: none;
+        }
+
+        input,
+        textarea,
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 14px;
+            background: #f7fafc;
+            transition: all 0.3s ease;
+            color: #2d3748;
+        }
+
+        input:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: #4299e1;
+            background: white;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
+        }
+
+        /* 工作流选择框样式 */
+        #workflowSelect {
+            font-family: inherit;
+            color: #2d3748;
+        }
+
+        #workflowSelect option {
+            padding: 8px 12px;
+            font-size: 14px;
+        }
+
+        /* Toast 通知样式 */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+
+        .toast {
+            background: white;
+            border-radius: 12px;
+            padding: 16px 24px;
+            margin-bottom: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            animation: slideIn 0.3s ease;
+            max-width: 350px;
+        }
+
+        .toast.success {
+            border-left: 4px solid #48bb78;
+        }
+
+        .toast.error {
+            border-left: 4px solid #e53e3e;
+        }
+
+        .toast.info {
+            border-left: 4px solid #4299e1;
+        }
+
+        .toast-message {
+            flex-grow: 1;
+            font-size: 14px;
+            color: #2d3748;
+        }
+
+        .toast-close {
+            cursor: pointer;
+            opacity: 0.6;
+            font-size: 18px;
+            color: #4a5568;
+        }
+
+        .toast-close:hover {
+            opacity: 1;
+        }
+
+        /* 模态框样式 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 16px;
+            padding: 28px;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            animation: slideUp 0.3s ease;
+        }
+
+        .modal-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #1a202c;
+        }
+
+        .modal-content {
+            margin-bottom: 24px;
+            color: #4a5568;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        .modal-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            min-width: 80px;
+            font-weight: 500;
+        }
+
+        .modal-btn.confirm {
+            background: #e53e3e;
+            color: white;
+            border: none;
+        }
+
+        .modal-btn.confirm:hover {
+            background: #c53030;
+        }
+
+        .modal-btn.confirm.run {
+            background: #48bb78;
+        }
+
+        .modal-btn.confirm.run:hover {
+            background: #38a169;
+        }
+
+        .modal-btn.cancel {
+            background: white;
+            border: 1px solid #e2e8f0;
+            color: #4a5568;
+        }
+
+        .modal-btn.cancel:hover {
+            background: #f7fafc;
+        }
+
+        /* 批量删除表单样式 */
+        .batch-tasks-list {
+            max-height: 400px;
+            overflow-y: auto;
+            margin: 20px 0;
+        }
+
+        .batch-task-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            background: #f7fafc;
+        }
+
+        .batch-task-item:hover {
+            background: #edf2f7;
+        }
+
+        .batch-task-checkbox {
+            margin-right: 12px;
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .batch-task-info {
+            flex-grow: 1;
+        }
+
+        .batch-task-name {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .batch-task-repo {
+            font-size: 12px;
+            color: #4a5568;
+        }
+
+        .select-all-item {
+            margin-bottom: 16px !important;
+        }
+
+        .select-all-item .batch-task-name {
+            font-weight: 600;
+            color: #2d3748;
+        }
+
+        /* 动画效果 */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(30px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(10px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        /* 响应式布局 */
+        @media (max-width: 1200px) {
+            .task-list {
+                grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+                gap: 20px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 16px;
+            }
+
+            h1 {
+                font-size: 24px;
+                margin-bottom: 30px;
+            }
+
+            .task-list {
+                grid-template-columns: 1fr;
+                padding: 0;
+            }
+
+            .task-item {
+                padding: 24px;
+            }
+
+
+            .header {
+                flex-direction: column;
+                gap: 16px;
+                align-items: stretch;
+                text-align: center;
+            }
+
+            .header-actions {
+                justify-content: center;
+            }
+
+            .action-button {
+                flex: 1;
+                justify-content: center;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+
+            .button-group button {
+                width: 100%;
+            }
+
+            .floating-form {
+                padding: 24px;
+            }
+        }
+
+        /* 暗色模式支持 */
+        @media (prefers-color-scheme: dark) {
+            .floating-form-trigger {
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            }
+
+            .floating-form-trigger:hover {
+                box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+            }
+        }
+
+        /* 添加工作流链接样式 */
+        .workflow-link {
+            color: inherit;
+            text-decoration: none;
+            display: block;
+            position: relative;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .workflow-link:hover {
+            color: #4299e1;
+        }
+
+        .workflow-link:hover::after {
+            content: '↗';
+            position: absolute;
+            right: -18px;
+            top: 0;
+        }
+    </style>
+</head>
+
+<body>
+
+
+<!-- 标题部分 -->
+<div class="header">
+    <h1>GitHub action 任务管理</h1>
+    <div class="header-actions">
+        <button class="action-button add-button" onclick="showForm()">
+            <span class="icon">+</span>
+            <span class="text">新增任务</span>
+        </button>
+        <button class="action-button delete-button" onclick="showBatchDeleteForm()">
+            <span class="icon">×</span>
+            <span class="text">批量删除</span>
+        </button>
+    </div>
+</div>
+
+<!-- 任务列表 -->
+<div id="taskList" class="task-list"></div>
+
+<!-- 批量删除表单容器 -->
+<div class="floating-form-container" id="batchDeleteContainer">
+    <div class="floating-form">
+        <h3 style="margin-top: 0;">批量删除任务</h3>
+        <div class="batch-tasks-list">
+            <!-- 任务列表将通过 JavaScript 动态填充 -->
+        </div>
+        <div class="button-group">
+            <button onclick="executeBatchDelete()" type="button">删除所选</button>
+            <button type="button" class="btn-default" onclick="hideBatchDeleteForm()">取消</button>
+        </div>
+    </div>
+</div>
+
+<!-- 悬浮表单容器 -->
+<div class="floating-form-container" id="formContainer">
+    <div class="floating-form">
+
+        <form id="taskForm" onsubmit="handleSubmit(event)">
+            <div class="form-group">
+                <label for="name">任务名称</label>
+                <input type="text" id="name" required>
+            </div>
+
+            <div class="form-group">
+                <label for="repo">仓库</label>
+                <input type="text" id="repo" required onchange="loadRepoInfo(this.value)">
+            </div>
+
+            <div class="form-group">
+                <label for="workflowSelect">工作流</label>
+                <select id="workflowSelect" required>
+                    <option value="">填入仓库后，点击获取工作流</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="branchSelect">分支</label>
+                <select id="branchSelect">
+                    <option value="main">main</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="cron">定时表达式</label>
+                <input type="text" id="cron" required>
+            </div>
+
+            <div class="form-group no-required">
+                <label for="description">描述</label>
+                <textarea id="description" rows="3"></textarea>
+            </div>
+
+            <div class="button-group">
+                <button type="submit">保存</button>
+                <button type="button" class="btn-default" onclick="hideForm()">取消</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Toast容器 -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- Modal容器 -->
+<div id="modalContainer"></div>
+
+<script>
+    const API_URL = '/api/tasks'
+    let editingTaskId = null
+    const statusCheckers = new Map()
+
+    /**
+     * 设置状态检查器
+     * @param {string} taskId - 任务ID
+     * @param {string} repo - 仓库名称
+     * @param {string} workflow - 工作流名称
+     * @param {Object} options - 配置选项
+     * @param {number} options.initialDelay - 初始延迟时间(ms)
+     * @param {number} options.checkInterval - 检查间隔时间(ms)
+     * @param {number} options.timeout - 超时时间(ms)
+     * @param {boolean} options.isCancelling - 是否为取消操作
+     */
+    function setupStatusChecker(taskId, repo, workflow, options = {}) {
+        const {
+            initialDelay = 1000,
+            checkInterval = 10000,
+            timeout = 300000,
+            isCancelling = false
+        } = options;
+
+        // 清除现有的状态检查器
+        if (statusCheckers.has(taskId)) {
+            clearInterval(statusCheckers.get(taskId));
+            statusCheckers.delete(taskId);
+        }
+
+        // 延迟启动新检查器
+        setTimeout(async () => {
+            await checkTaskStatus(taskId, repo, workflow, isCancelling);
+
+            const checker = setInterval(async () => {
+                const status = await checkTaskStatus(taskId, repo, workflow, isCancelling);
+
+                // 当任务完成、失败或取消时停止检查
+                if (status?.status === 'SUCCESS' ||
+                    status?.status === 'FAILURE' ||
+                    status?.status === 'CANCELLED') {
+                    clearInterval(checker);
+                    statusCheckers.delete(taskId);
+                }
+            }, checkInterval);
+
+            statusCheckers.set(taskId, checker);
+
+            // 设置超时清理
+            setTimeout(() => {
+                if (statusCheckers.has(taskId)) {
+                    clearInterval(statusCheckers.get(taskId));
+                    statusCheckers.delete(taskId);
+                }
+            }, timeout);
+        }, initialDelay);
+    }
+
+    /**
+     * 显示/隐藏表单
+     */
+    function showForm() {
+        document.getElementById('formContainer').classList.add('active')
+        document.body.style.overflow = 'hidden'
+
+        // 如果不是编辑状态，才重置表单
+        if (!editingTaskId) {
+            const form = document.getElementById('taskForm')
+            form.reset()
+            document.getElementById('workflowSelect').innerHTML = '<option value="">填入仓库后，点击获取工作流</option>'
+            document.getElementById('branchSelect').innerHTML = '<option value="main">main</option>'
+
+            // 新建时才初始化空数据
+            window.originalTaskData = {
+                name: '',
+                repo: '',
+                workflow: '',
+                ref: 'main',
+                cron: '',
+                description: ''
+            }
+        }
+    }
+
+    /**
+     * 隐藏表单并清理数据
+     */
+    function hideForm() {
+        document.getElementById('formContainer').classList.remove('active')
+        document.body.style.overflow = ''
+        document.getElementById('taskForm').reset()
+        editingTaskId = null
+        window.originalTaskData = null  // 清理原始数据
+        document.querySelector('button[type="submit"]').textContent = '保存'
+        document.getElementById('workflowSelect').innerHTML = '<option value="">填入仓库后，点击获取工作流</option>'
+        document.getElementById('branchSelect').innerHTML = '<option value="main">main</option>'
+    }
+
+    /**
+     * 处理表单提交
+     * @param {Event} event - 表单提交事件
+     */
+    async function handleSubmit(event) {
+        event.preventDefault()
+        const form = event.target
+        const formData = {
+            name: form.querySelector('#name').value.trim(),
+            repo: form.querySelector('#repo').value.trim(),
+            workflow: form.querySelector('#workflowSelect').value,
+            ref: form.querySelector('#branchSelect').value,
+            cron: form.querySelector('#cron').value.trim(),
+            description: form.querySelector('#description').value.trim()
+        }
+
+        // 验证 cron 表达式
+        const cronValidation = validateCron(formData.cron);
+        if (!cronValidation.valid) {
+            showToast(cronValidation.message, 'error');
+            return;
+        }
+
+        // 检查是否为空表单提交
+        const isEmptyForm = !formData.name || !formData.repo || !formData.workflow || !formData.cron;
+        if (isEmptyForm) {
+            showToast('请填写必填项', 'info');
+            return false;
+        }
+
+        // 检查是否有实际修改
+        if (window.originalTaskData) {
+            const hasChanges = Object.keys(formData).some(key => formData[key] !== window.originalTaskData[key]);
+            if (!hasChanges) {
+                showToast('未做任何修改', 'info');
+                return false;
+            }
+        }
+
+        try {
+            // 先检查是否存在相同工作流的任务
+            const response = await fetch(API_URL)
+            const tasks = await response.json()
+
+            const existingTask = tasks.find(task =>
+                task.repo === formData.repo &&
+                task.workflow === formData.workflow &&
+                task.id !== editingTaskId  // 排除当前编辑的任务
+            )
+
+            if (existingTask) {
+                showToast(`仓库 ${formData.repo} 的工作流 ${formData.workflow} 存在`, 'info')
+                return
+            }
+
+            const url = editingTaskId ? `${API_URL}` : API_URL
+            const method = editingTaskId ? 'PUT' : 'POST'
+            const body = editingTaskId ? {...formData, id: editingTaskId} : formData
+
+            const saveResponse = await fetch(url, {
+                method,
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            })
+
+            const result = await saveResponse.json()
+
+            if (!saveResponse.ok) {
+                if (saveResponse.status === 400) {
+                    window.originalTaskData = formData;
+                    showToast(result.error, 'info')
+                } else {
+                    throw new Error(result.error || '保存失败')
+                }
+                return
+            }
+
+            await fetchTasks()
+            showToast(editingTaskId ? '更新成功' : '创建成功', 'success')
+            hideForm()
+        } catch (error) {
+            console.error('保存失败:', error)
+            showToast(error.message, 'error')
+        }
+    }
+
+    /**
+     * 获取并渲染任务列表
+     */
+    async function fetchTasks() {
+        try {
+            const response = await fetch(API_URL)
+            const tasks = await response.json()
+
+            // 添加调试信息
+            console.log('获取到的任务列表:', tasks)
+
+            const taskList = document.getElementById('taskList')
+            taskList.innerHTML = tasks.map(task => `
+                <div class="task-item" data-id="${task.id}">
+                    <div class="task-item-content">
+                        <h3 title="${task.name}">${task.name}</h3>
+                        <div class="task-info">
+                            <p>
+                                <strong>仓库:</strong>
+                                <span title="${task.repo}">${task.repo}</span>
+                            </p>
+                            <p>
+                                <strong>工作流:</strong>
+                                <span title="${task.workflow}">
+                                    <a href="https://github.com/${task.repo}/blob/main/.github/workflows/${task.workflow}"
+                                       target="_blank"
+                                       class="workflow-link"
+                                       title="在 GitHub 中查看工作流文件">
+                                        ${task.workflow}
+                                    </a>
+                                </span>
+                            </p>
+                            <p>
+                                <strong>分支:</strong>
+                                <span>${task.ref}</span>
+                            </p>
+                            <p>
+                                <strong>Cron:</strong>
+                                <span>${task.cron}</span>
+                            </p>
+                            <p>
+                                <strong>描述:</strong>
+                                <span title="${task.description || '-'}">${task.description || '-'}</span>
+                            </p>
+                        </div>
+                        <div class="task-status" id="status-${task.id}">
+                            <p>
+                                <span>最近执行:</span>
+                                <span class="status-text">-</span>
+                            </p>
+                            <p>
+                                <span>执行结果:</span>
+                                <span class="status-result">等待中</span>
+                            </p>
+                            <p>
+                                <span>运行ID:</span>
+                                <span class="run-id">-</span>
+                            </p>
+                            <div class="cancel-btn-container" id="cancel-btn-${task.id}"></div>
+                        </div>
+                    </div>
+                    <div class="button-group">
+                        <button onclick="editTask('${task.id}')" class="btn-default">编辑</button>
+                        <button onclick="deleteTask('${task.id}')" class="btn-default">删除</button>
+                        <button onclick="runTask('${task.id}')" class="btn-default">执行</button>
+                    </div>
+                </div>
+            `).join('')
+
+            // 添加调试信息
+            console.log('列表渲染完成')
+
+            // 开始检查每个任务的状态
+            tasks.forEach(task => {
+                checkTaskStatus(task.id, task.repo, task.workflow)
+            })
+        } catch (error) {
+            console.error('获取任务列表失败:', error)
+            showToast('获取任务列表失败', 'error')
+        }
+    }
+
+    /**
+     * 删除任务
+     * @param {string} id - 任务ID
+     */
+    function deleteTask(id) {
+        showModal({
+            title: '确认删除',
+            content: '确定要删除这个任务吗？',
+            onConfirm: async () => {
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'DELETE',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({id})
+                    })
+
+                    if (!response.ok) {
+                        throw new Error('删除失败')
+                    }
+
+                    showToast('删除成功', 'success')
+                    fetchTasks()
+                } catch (error) {
+                    console.error('删除失败:', error)
+                    showToast(error.message, 'error')
+                }
+            }
+        })
+    }
+
+    /**
+     * 运行任务
+     * @param {string} id - 任务ID
+     */
+    function runTask(id) {
+        showModal({
+            title: '确认执行',
+            content: '确定要立即执行这个任务吗？',
+            confirmText: '执行',
+            cancelText: '取消',
+            confirmClass: 'run',
+            onConfirm: async () => {
+                try {
+                    const response = await fetch(`${API_URL}/run`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({id})
+                    })
+
+                    const result = await response.json()
+
+                    if (result.status === 'disabled') {
+                        showToast(result.message, 'info')
+                        return
+                    }
+
+                    if (!response.ok) {
+                        throw new Error(result.error || '执行失败')
+                    }
+
+                    showToast('任务已触发', 'success')
+
+                    // 获取任务信息
+                    const taskResponse = await fetch(API_URL)
+                    const tasks = await taskResponse.json()
+                    const task = tasks.find(t => t.id === id)
+
+                    if (!task) {
+                        throw new Error('任务不存在')
+                    }
+
+                    // 使用通用的状态检查器设置
+                    setupStatusChecker(id, task.repo, task.workflow)
+
+                } catch (error) {
+                    console.error('执行错误:', error)
+                    showToast(error.message, 'error')
+                }
+            }
+        })
+    }
+
+    /**
+     * 取消运行中的任务
+     * @param {string} taskId - 任务ID
+     * @param {string} repo - 仓库名称
+     * @param {string} runId - 运行ID
+     */
+    async function cancelRun(taskId, repo, runId) {
+        showModal({
+            title: '确认取消',
+            content: '确定要取消这个任务吗',
+            confirmText: '取消任务',
+            cancelText: '关闭',
+            onConfirm: async () => {
+                try {
+                    const response = await fetch(API_URL)
+                    const tasks = await response.json()
+                    const task = tasks.find(t => t.id === taskId)
+
+                    if (!task) {
+                        throw new Error('任务不存在')
+                    }
+
+                    const statusDiv = document.getElementById(`status-${taskId}`)
+                    const statusResult = statusDiv.querySelector('.status-result')
+                    statusResult.textContent = '取消中...'
+                    statusResult.className = 'status-result waiting'
+
+                    const cancelResponse = await fetch(`${API_URL}/cancel`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({repo, run_id: runId})
+                    })
+
+                    if (!cancelResponse.ok) {
+                        throw new Error('取消失败')
+                    }
+
+                    // 使用通用的状态检查器设置
+                    setupStatusChecker(taskId, repo, task.workflow, {
+                        checkInterval: 500,
+                        timeout: 30000,
+                        isCancelling: true
+                    })
+
+                } catch (error) {
+                    console.error('取消失败:', error)
+                    showToast('取消失败: ' + error.message, 'error')
+                }
+            }
+        })
+    }
+
+    /**
+     * 编辑任务
+     * @param {string} id - 任务ID
+     */
+    async function editTask(id) {
+        try {
+            const response = await fetch(API_URL);
+            const tasks = await response.json();
+            const task = tasks.find(t => t.id === id);
+
+            if (!task) {
+                throw new Error('任务不存在');
+            }
+
+            // 保存原始数据用于比较
+            window.originalTaskData = {...task};
+            editingTaskId = id;
+
+            // 填充基本字段
+            document.getElementById('name').value = task.name;
+            document.getElementById('repo').value = task.repo;
+            document.getElementById('cron').value = task.cron;
+            document.getElementById('description').value = task.description || '';
+
+            // 移除工作流路径中的前缀
+            const workflowPath = task.workflow.replace(/^\.github\/workflows\//, '');
+            await loadRepoInfo(task.repo, workflowPath);
+
+            // 修改这里：移除setTimeout，直接设置选中值
+            const workflowSelect = document.getElementById('workflowSelect');
+            const branchSelect = document.getElementById('branchSelect');
+
+            workflowSelect.value = workflowPath;
+            branchSelect.value = task.ref;
+
+            // 新按钮文本
+            document.querySelector('button[type="submit"]').textContent = '更新';
+
+            showForm();
+        } catch (error) {
+            console.error('编辑失败:', error);
+            showToast(error.message, 'error');
+        }
+    }
+
+    /**
+     * 加载仓库信息
+     * @param {string} repo - 仓库名称
+     * @param {string} selectedWorkflow - 当前选中的工作流路径
+     */
+    async function loadRepoInfo(repo, selectedWorkflow = '') {
+        if (!repo) return;
+
+        try {
+            // 获取选择框元素
+            const workflowSelect = document.getElementById('workflowSelect');
+            const branchSelect = document.getElementById('branchSelect');
+
+            // 如果不是编辑状态，才显示加载中
+            if (!editingTaskId) {
+                workflowSelect.innerHTML = '<option value="">加载中...</option>';
+                branchSelect.innerHTML = '<option value="">加载中...</option>';
+            }
+
+            // 取仓库信息
+            const response = await fetch(`${API_URL}/repo-info?repo=${encodeURIComponent(repo)}`);
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || '加载失败');
+            }
+
+            // 更新工作流选择框，移除 .github/workflows/ 前缀
+            workflowSelect.innerHTML = data.workflows.map(wf => {
+                const workflowPath = wf.path.replace(/^\.github\/workflows\//, '');
+                const isSelected = selectedWorkflow === workflowPath;
+                return `
+                <option value="${workflowPath}" ${isSelected ? 'selected' : ''} class="workflow-option">
+                    ${wf.name} (${workflowPath})
+                </option>
+            `;
+            }).join('');
+
+            // 更新分支选择框
+            branchSelect.innerHTML = data.branches.length
+                ? data.branches.map(branch => {
+                    const isSelected = editingTaskId && window.originalTaskData?.ref === branch;
+                    return `<option value="${branch}" ${isSelected ? 'selected' : ''}>${branch}</option>`;
+                }).join('')
+                : '<option value="main">main</option>';
+
+            // 如果是编辑状态，确保选中正确的值
+            if (editingTaskId && window.originalTaskData) {
+                // 移除工作流路径中的前缀
+                const workflowPath = window.originalTaskData.workflow.replace(/^\.github\/workflows\//, '');
+                workflowSelect.value = workflowPath;
+                branchSelect.value = window.originalTaskData.ref;
+            }
+
+        } catch (error) {
+            console.error('加载仓库信息失败:', error);
+
+            if (editingTaskId && window.originalTaskData) {
+                // 编辑状态下，恢复原有选项，同样移除前缀
+                const workflowPath = window.originalTaskData.workflow.replace(/^\.github\/workflows\//, '');
+                workflowSelect.innerHTML = `
+                <option value="${workflowPath}" selected>
+                    ${workflowPath}
+                </option>`;
+                branchSelect.innerHTML = `
+                <option value="${window.originalTaskData.ref}" selected>
+                    ${window.originalTaskData.ref}
+                </option>`;
+            } else {
+                // 编辑状态下，显示错误提示
+                workflowSelect.innerHTML = '<option value="">加载失败，请重试</option>';
+                branchSelect.innerHTML = '<option value="main">main</option>';
+            }
+
+            // 显示错误提示
+            showToast('加载仓库信息失败: ' + error.message, 'error');
+        }
+    }
+
+
+    /**
+     * 检查任务状态
+     * @param {string} taskId - 任务ID
+     * @param {string} repo - 仓库名称
+     * @param {string} workflow - 工作流名称
+     * @param {boolean} isCancelling - 是否为取消操作
+     */
+    async function checkTaskStatus(taskId, repo, workflow, isCancelling = false) {
+        try {
+            // 获取状态显示元素
+            const statusDiv = document.getElementById(`status-${taskId}`)
+            if (!statusDiv) return null
+
+            const statusText = statusDiv.querySelector('.status-text')
+            const statusResult = statusDiv.querySelector('.status-result')
+            const runIdSpan = statusDiv.querySelector('.run-id')
+            const cancelBtnContainer = document.getElementById(`cancel-btn-${taskId}`)
+
+            // 发送POST请求获取状态
+            const response = await fetch(`${API_URL}/status`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({repo, workflow})
+            })
+
+            if (!response.ok) {
+                throw new Error('查询失败')
+            }
+
+            const result = await response.json()
+
+            // 更新最近执行时间
+            statusText.textContent = result.last_run ? new Date(result.last_run).toLocaleString() : '-'
+
+            // 更新运行ID
+            runIdSpan.textContent = result.run_id || '-'
+
+            // 更新状态显示
+            if (isCancelling && result.status !== 'CANCELLED') {
+                statusResult.textContent = '取消中...'
+                statusResult.className = 'status-result waiting'
+            } else {
+                statusResult.textContent = getStatusText(result.status)
+                statusResult.className = `status-result ${getStatusClass(result.status)}`
+            }
+
+            // 更新取消按钮
+            if (result.status === 'RUNNING' && result.run_id && !isCancelling) {
+                cancelBtnContainer.innerHTML = `
+                <button onclick="cancelRun('${taskId}', '${repo}', '${result.run_id}')">
+                    取消运行
+                </button>`
+                cancelBtnContainer.classList.add('active')
+            } else {
+                cancelBtnContainer.innerHTML = ''
+                cancelBtnContainer.classList.remove('active')
+            }
+
+            return result
+
+        } catch (error) {
+            console.error('状态查询错误:', error)
+
+            // 获取状态显示元素
+            const statusDiv = document.getElementById(`status-${taskId}`)
+            if (statusDiv && !isCancelling) {
+                const statusText = statusDiv.querySelector('.status-text')
+                const statusResult = statusDiv.querySelector('.status-result')
+                const runIdSpan = statusDiv.querySelector('.run-id')
+                const cancelBtnContainer = document.getElementById(`cancel-btn-${taskId}`)
+
+                // 更新错误状态显示
+                statusText.textContent = '-'
+                statusResult.textContent = '查询失败'
+                statusResult.className = 'status-result failure'
+                runIdSpan.textContent = '-'
+                cancelBtnContainer.innerHTML = ''
+                cancelBtnContainer.classList.remove('active')
+            }
+
+            return null
+        }
+    }
+
+    /**
+     * 获取状态显示文本
+     * @param {string} status - 状态代码
+     * @returns {string} 状态显示文本
+     */
+    function getStatusText(status) {
+        const statusMap = {
+            'SUCCESS': '执行成功',
+            'FAILURE': '执行失败',
+            'RUNNING': '执行中',
+            'NEVER_RUN': '从未运行',
+            'CANCELLED': '已取消',
+            'DISABLED': '已禁用',
+            'NOT_FOUND': '不存在',
+            'API_ERROR': 'API错误'
+        }
+        return statusMap[status] || status
+    }
+
+    /**
+     * 获取状态样式类名
+     * @param {string} status - 状态代码
+     * @returns {string} 样式类名
+     */
+    function getStatusClass(status) {
+        const classMap = {
+            'SUCCESS': 'success',
+            'FAILURE': 'failure',
+            'RUNNING': 'running',
+            'NEVER_RUN': 'waiting',
+            'CANCELLED': 'cancelled',
+            'DISABLED': 'failure',
+            'NOT_FOUND': 'failure',
+            'API_ERROR': 'failure'
+        }
+        return classMap[status] || ''
+    }
+
+    /**
+     * 显示模态框
+     * @param {Object} options - 模态框配置选项
+     */
+    function showModal(options) {
+        const {title, content, onConfirm, confirmText = '确认', cancelText = '取消', confirmClass = ''} = options
+        const modalHtml = `
+            <div class="modal-overlay">
+                <div class="modal">
+                    <div class="modal-title">${title}</div>
+                    <div class="modal-content">${content}</div>
+                    <div class="modal-actions">
+                        <button class="modal-btn cancel" onclick="this.closest('.modal-overlay').remove()">${cancelText}</button>
+                        <button class="modal-btn confirm ${confirmClass}" id="modalConfirm">${confirmText}</button>
+                    </div>
+                </div>
+            </div>`
+
+        document.getElementById('modalContainer').innerHTML = modalHtml
+
+        document.getElementById('modalConfirm').onclick = async () => {
+            await onConfirm()
+            document.querySelector('.modal-overlay').remove()
+        }
+    }
+
+    /**
+     * 显示提示消息
+     * @param {string} message - 提示信息
+     * @param {string} type - 提示类型
+     */
+    function showToast(message, type = 'info') {
+        const toast = document.createElement('div')
+        toast.className = `toast ${type}`
+        toast.innerHTML = `
+            <span class="toast-message">${message}</span>
+            <span class="toast-close" onclick="this.parentElement.remove()">×</span>`
+
+        document.getElementById('toastContainer').appendChild(toast)
+
+        setTimeout(() => toast.remove(), 3000)
+    }
+
+    /**
+     * 显示批量删除表单
+     */
+    function showBatchDeleteForm() {
+        const container = document.getElementById('batchDeleteContainer');
+        container.classList.add('active');
+        document.body.style.overflow = 'hidden';
+
+        // 获取当前任务列表并渲染到表单中
+        const tasksList = document.querySelector('.batch-tasks-list');
+        const tasks = Array.from(document.querySelectorAll('.task-item')).map(item => ({
+            id: item.dataset.id,
+            name: item.querySelector('h3').textContent,
+            repo: item.querySelector('.task-info span').textContent
+        }));
+
+        // 添加全选复选框
+        const selectAllHtml = `
+        <div class="batch-task-item select-all-item">
+            <input type="checkbox" id="selectAll" class="batch-task-checkbox">
+            <div class="batch-task-info">
+                <div class="batch-task-name">全选</div>
+            </div>
+        </div>
+    `;
+
+        // 渲染任务列表
+        tasksList.innerHTML = selectAllHtml + tasks.map(task => `
+        <div class="batch-task-item">
+            <input type="checkbox" class="batch-task-checkbox" data-id="${task.id}">
+            <div class="batch-task-info">
+                <div class="batch-task-name">${task.name}</div>
+                <div class="batch-task-repo">${task.repo}</div>
+            </div>
+        </div>
+    `).join('');
+
+        // 添加全选事件监听
+        const selectAllCheckbox = document.getElementById('selectAll');
+        selectAllCheckbox.addEventListener('change', function () {
+            const checkboxes = document.querySelectorAll('.batch-task-checkbox:not(#selectAll)');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = this.checked;
+            });
+        });
+
+        // 添加单个复选框变化监听，用于更新全选状态
+        const checkboxes = document.querySelectorAll('.batch-task-checkbox:not(#selectAll)');
+        checkboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', function () {
+                const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+                selectAllCheckbox.checked = allChecked;
+            });
+        });
+    }
+
+    /**
+     * 隐藏批量删除表单
+     */
+    function hideBatchDeleteForm() {
+        document.getElementById('batchDeleteContainer').classList.remove('active');
+        document.body.style.overflow = '';
+    }
+
+    /**
+     * 执行批量删除
+     */
+    async function executeBatchDelete() {
+        const selectedTasks = Array.from(document.querySelectorAll('.batch-task-checkbox:checked'))
+            .map(checkbox => checkbox.dataset.id);
+
+        if (selectedTasks.length === 0) {
+            showToast('请选择要删除的任务', 'info');
+            return;
+        }
+
+        showModal({
+            title: '确认批量删除',
+            content: `确定要删除选中的 ${selectedTasks.length} 个任务吗？`,
+            onConfirm: async () => {
+                try {
+                    const deletePromises = selectedTasks.map(id =>
+                        fetch(API_URL, {
+                            method: 'DELETE',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({id})
+                        })
+                    );
+
+                    await Promise.all(deletePromises);
+                    showToast('批量删除成功', 'success');
+                    hideBatchDeleteForm();
+                    fetchTasks();
+                } catch (error) {
+                    console.error('批量删除失败:', error);
+                    showToast('批量删除失败', 'error');
+                }
+            }
+        });
+    }
+
+    /**
+     * 验证 cron 表达式
+     * @param {string} cron - cron 表达式
+     * @returns {Object} 验证结果
+     */
+    function validateCron(cron) {
+        // 基本格式检查
+        const cronRegex = /^(\S+\s+){4}\S+$/;
+        if (!cronRegex.test(cron)) {
+            return {
+                valid: false,
+                message: 'Cron 表达式必须包含 5 个字段: 分 时 日 月 周'
+            };
+        }
+
+        const [minute, hour, dayOfMonth, month, dayOfWeek] = cron.split(/\s+/);
+
+        // Cloudflare Workers cron 规则
+        const rules = {
+            minute: { min: 0, max: 59 },
+            hour: { min: 0, max: 23 },
+            dayOfMonth: { min: 1, max: 31 },
+            month: { min: 1, max: 12 },
+            dayOfWeek: { min: 0, max: 6 }
+        };
+
+        try {
+            // 验证各个字段
+            if (!validateCronField(minute, rules.minute)) {
+                return {
+                    valid: false,
+                    message: '分钟格式错误 (允许: 0-59, *, */n)'
+                };
+            }
+
+            if (!validateCronField(hour, rules.hour)) {
+                return {
+                    valid: false,
+                    message: '小时格式错误 (允许: 0-23, *, */n)'
+                };
+            }
+
+            if (!validateCronField(dayOfMonth, rules.dayOfMonth)) {
+                return {
+                    valid: false,
+                    message: '日期格式错误 (允许: 1-31, *, */n)'
+                };
+            }
+
+            if (!validateCronField(month, rules.month)) {
+                return {
+                    valid: false,
+                    message: '月份格式错误 (允许: 1-12, *, */n)'
+                };
+            }
+
+            if (!validateCronField(dayOfWeek, rules.dayOfWeek)) {
+                return {
+                    valid: false,
+                    message: '星期格式错误 (允许: 0-6, *, */n, 0=周日)'
+                };
+            }
+
+            return { valid: true };
+        } catch (error) {
+            return {
+                valid: false,
+                message: `Cron 表达式格式错误: ${error.message}`
+            };
+        }
+    }
+
+    /**
+     * 验证 cron 表达式字段
+     * @param {string} field - 字段值
+     * @param {Object} rule - 验证规则
+     * @returns {boolean} 是否有效
+     */
+    function validateCronField(field, rule) {
+        // 处理 * 号
+        if (field === '*') return true;
+
+        // 处理 */n 格式
+        if (field.startsWith('*/')) {
+            const step = parseInt(field.substring(2));
+            return !isNaN(step) && step > 0 && step <= rule.max;
+        }
+
+        // 处理逗号分隔的列表
+        if (field.includes(',')) {
+            return field.split(',').every(value => validateCronField(value, rule));
+        }
+
+        // 处理范围
+        if (field.includes('-')) {
+            const [start, end] = field.split('-').map(Number);
+            return !isNaN(start) && !isNaN(end) &&
+                start >= rule.min && start <= rule.max &&
+                end >= rule.min && end <= rule.max &&
+                start <= end;
+        }
+
+        // 处理单个数值
+        const num = parseInt(field);
+        return !isNaN(num) && num >= rule.min && num <= rule.max;
+    }
+
+    // 页面加载完成后获取任务列表
+    document.addEventListener('DOMContentLoaded', fetchTasks)
+
+    // 添加实时验证功能
+    document.getElementById('cron').addEventListener('input', function(e) {
+        const cronInput = e.target;
+        const validation = validateCron(cronInput.value);
+
+        // 更新输入框样式
+        if (cronInput.value) {
+            if (validation.valid) {
+                cronInput.style.borderColor = '#48bb78';
+                cronInput.title = '有效的 Cron 表达式';
+            } else {
+                cronInput.style.borderColor = '#e53e3e';
+                cronInput.title = validation.message;
+            }
+        } else {
+            cronInput.style.borderColor = ''; // 恢复默认边框颜色
+            cronInput.title = '';
+        }
+    });
+
+    // 添加 Cron 表达式帮助提示
+    const cronHelp = `
+    <div class="form-group no-required" style="margin-top: -15px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div>
+                <small style="color: #718096;">
+                    <strong>支持的格式:</strong><br>
+                    • * (任意值，如 * * * * * 表示每分钟)<br>
+                    • */n (每 n 个单位，如 */15 表示每15分钟)<br>
+                    • 1-5 (范围值，如 1-5 表示1到5)<br>
+                    • 1,2,3 (指定多个值，用逗号分隔)<br>
+                    • 具体数字 (如 30 表示第30分钟)<br>
+                    <br>
+                    <strong>字段说明:</strong><br>
+                    分 时 日 月 周<br>
+                    <span style="color: #A0AEC0">
+                    (0-59 0-23 1-31 1-12 0-6)
+                    </span>
+                </small>
+            </div>
+            <div>
+                <small style="color: #718096;">
+                    <strong>常用示例:</strong><br>
+                    • */5 * * * *
+                    <span style="color: #A0AEC0">(每5分钟执行)</span><br>
+                    • 0 */2 * * *
+                    <span style="color: #A0AEC0">(每2小时执行)</span><br>
+                    • 30 1 * * *
+                    <span style="color: #A0AEC0">(每天1:30执行)</span><br>
+                    • 0 0 * * 1-5
+                    <span style="color: #A0AEC0">(工作日0点执行)</span><br>
+                    • 0 0 1,15 * *
+                    <span style="color: #A0AEC0">(每月1号和15号执行)</span>
+                </small>
+            </div>
+        </div>
+    </div>`;
+
+    // 在 cron 输入框后插入帮助信息
+    document.querySelector('#cron').parentElement.insertAdjacentHTML('afterend', cronHelp);
+</script>
+</body>
+
+</html>
