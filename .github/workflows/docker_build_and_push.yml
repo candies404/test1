@@ -12,8 +12,8 @@ on:
         required: false
         type: string
         default: "Dockerfile"
-      dockerfile_content:
-        description: "Dockerfile内容（选填）"
+      dockerfile_content_base64:
+        description: "Dockerfile内容（base64编码）"
         required: false
         type: string
       image_name:
@@ -48,15 +48,10 @@ jobs:
         working-directory: ./source
         run: |
           echo "验证Dockerfile位置：${{ github.event.inputs.dockerfile_path }}"
-          if [ -n "${{ github.event.inputs.dockerfile_content }}" ]; then
+          if [ -n "${{ github.event.inputs.dockerfile_content_base64 }}" ]; then
             mkdir -p $(dirname "${{ github.event.inputs.dockerfile_path }}")
-            # 关键修复：使用带引号的EOF保留换行符
-            cat << 'EOF' > "${{ github.event.inputs.dockerfile_path }}"
-            ${{ github.event.inputs.dockerfile_content }}
-            EOF
+            echo "${{ github.event.inputs.dockerfile_content_base64 }}" | base64 -d > "${{ github.event.inputs.dockerfile_path }}"
             echo "✔ 已生成动态Dockerfile"
-            echo "生成的Dockerfile内容："
-            cat "${{ github.event.inputs.dockerfile_path }}"
           fi
 
       - name: 登录 Docker Hub
