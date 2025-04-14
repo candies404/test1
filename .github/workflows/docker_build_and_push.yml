@@ -1,32 +1,35 @@
-name: Docker镜像自动化构建
+name: "Docker镜像自动化构建"
+
 on:
   workflow_dispatch:
     inputs:
       target_repo:
-        description: 目标仓库地址（格式：owner/repo）
+        description: '目标仓库地址（格式：owner/repo）'
         required: true
         type: string
       dockerfile_path:
-        description: Dockerfile相对路径（默认：./Dockerfile）
+        description: 'Dockerfile相对路径（默认：./Dockerfile）'
         required: false
         type: string
-        default: Dockerfile
+        default: 'Dockerfile'
       dockerfile_content:
-        description: Dockerfile内容（选填）
+        description: 'Dockerfile内容（选填）'
         required: false
         type: string
       image_name:
-        description: 镜像名（默认使用目标仓库名）
+        description: '镜像名（默认使用目标仓库名）'
         required: false
         type: string
       image_tag:
-        description: 镜像标签（默认：latest）
+        description: '镜像标签（默认：latest）'
         required: false
         type: string
-        default: latest
+        default: 'latest'
+
 env:
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
 jobs:
   docker-pipeline:
     runs-on: ubuntu-latest
@@ -41,24 +44,26 @@ jobs:
             echo "::error::仓库不存在或无权访问: $repo_url"
             exit 1
           fi
-
+          
           echo "正在克隆仓库..."
           git clone "$repo_url" ./source
           cd ./source
           echo "✔ 仓库克隆完成"
-      - name: 准备构建环境
-        run: >
-          echo "验证Dockerfile位置：${{ inputs.dockerfile_path }}"
 
+      - name: 准备构建环境
+        run: |
+          echo "验证Dockerfile位置：${{ inputs.dockerfile_path }}"
           if [ -n "${{ inputs.dockerfile_content }}" ]; then
             echo "${{ inputs.dockerfile_content }}" > ${{ inputs.dockerfile_path }}
             echo "✔ 已生成动态Dockerfile"
           fi
+
       - name: 登录 Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
+
       - name: 构建并推送镜像
         run: |
           # 设置镜像名称
@@ -69,10 +74,10 @@ jobs:
           else
             IMAGE_NAME="${{ inputs.image_name }}"
           fi
-
+          
           TAG="$IMAGE_NAME:${{ inputs.image_tag }}"
           echo "开始构建镜像：$TAG"
-
+          
           docker build -t $TAG -f ${{ inputs.dockerfile_path }} .
           docker push $TAG
           echo "✔ 镜像已推送至仓库"
