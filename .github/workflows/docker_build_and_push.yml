@@ -36,25 +36,21 @@ jobs:
     steps:
       - name: 验证并克隆目标仓库
         run: |
-          # 标准化仓库地址格式
-          repo_url="https://github.com/${{ inputs.target_repo }}.git"
-
-          # 检查仓库是否存在
+          repo_url="https://github.com/${{ github.event.inputs.target_repo }}.git"
           if ! git ls-remote --quiet "$repo_url" > /dev/null 2>&1; then
             echo "::error::仓库不存在或无权访问: $repo_url"
             exit 1
           fi
-          
           echo "正在克隆仓库..."
           git clone "$repo_url" ./source
-          cd ./source
-          echo "✔ 仓库克隆完成"
 
       - name: 准备构建环境
+        working-directory: ./source  # 关键修正：设置工作目录
         run: |
-          echo "验证Dockerfile位置：${{ inputs.dockerfile_path }}"
-          if [ -n "${{ inputs.dockerfile_content }}" ]; then
-            echo "${{ inputs.dockerfile_content }}" > ${{ inputs.dockerfile_path }}
+          echo "验证Dockerfile位置：${{ github.event.inputs.dockerfile_path }}"
+          if [ -n "${{ github.event.inputs.dockerfile_content }}" ]; then
+            mkdir -p $(dirname "${{ github.event.inputs.dockerfile_path }}")
+            echo "${{ github.event.inputs.dockerfile_content }}" > "${{ github.event.inputs.dockerfile_path }}"
             echo "✔ 已生成动态Dockerfile"
           fi
 
@@ -65,19 +61,16 @@ jobs:
           password: ${{ env.DOCKERHUB_TOKEN }}
 
       - name: 构建并推送镜像
+        working-directory: ./source  # 关键修正：确保构建上下文正确
         run: |
-          # 设置镜像名称
-          if [ -z "${{ inputs.image_name }}" ]; then
-            # 使用Docker Hub用户名作为前缀 + 仓库名作为默认镜像名
-            REPO_NAME=$(basename "${{ inputs.target_repo }}")
+          if [ -z "${{ github.event.inputs.image_name }}" ]; then
+            REPO_NAME=$(basename "${{ github.event.inputs.target_repo }}")
             IMAGE_NAME="${{ env.DOCKERHUB_USERNAME }}/$REPO_NAME"
           else
-            IMAGE_NAME="${{ inputs.image_name }}"
+            IMAGE_NAME="${{ github.event.inputs.image_name }}"
           fi
-          
-          TAG="$IMAGE_NAME:${{ inputs.image_tag }}"
+          TAG="$IMAGE_NAME:${{ github.event.inputs.image_tag }}"
           echo "开始构建镜像：$TAG"
-          
-          docker build -t $TAG -f ${{ inputs.dockerfile_path }} .
+          docker build -t $TAG -f "${{ github.event.inputs.dockerfile_path }}" .
           docker push $TAG
           echo "✔ 镜像已推送至仓库"
