@@ -1,57 +1,61 @@
-name: "Docker镜像自动化构建"
+name: "Docker镜像构建与推送"  
 
 on:
   workflow_dispatch:
     inputs:
       target_repo:
-        description: '目标镜像仓库名称（如：myorg/myrepo）'
+        description: '目标仓库名称（如：myorg/myrepo）'
         required: true
         type: string
       dockerfile_path:
-        description: 'Dockerfile相对路径（默认：./Dockerfile）'
+        description: 'Dockerfile路径（默认：./Dockerfile）'
         required: false
         type: string
         default: 'Dockerfile'
       dockerfile_content:
-        description: '直接写入Dockerfile内容（选填）'
+        description: '自定义Dockerfile内容（可选）'
         required: false
         type: string
       image_tag:
-        description: '镜像标签（默认：latest）'
+        description: '镜像标签（如：v1.0, 默认：latest）' 
         required: false
         type: string
         default: 'latest'
 
 env:
-  REGISTRY_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-  REGISTRY_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
 jobs:
-  docker-pipeline:
+  build-and-push:
     runs-on: ubuntu-latest
     steps:
-      - name: 获取代码
+      - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 准备构建环境
+      - name: 配置Dockerfile
         run: |
-          echo "▌验证Dockerfile位置：${{ inputs.dockerfile_path }}"
+          echo "🔄 处理Dockerfile..."
           if [ -n "${{ inputs.dockerfile_content }}" ]; then
             echo "${{ inputs.dockerfile_content }}" > ${{ inputs.dockerfile_path }}
-            echo "✔ 已生成动态Dockerfile"
+            echo "✅ 已生成自定义Dockerfile"
+          else
+            echo "ℹ️ 使用现有的：${{ inputs.dockerfile_path }}"
           fi
 
-      - name: 容器仓库认证
+      - name: 登录Docker Hub
         run: |
-          echo "${{ env.REGISTRY_TOKEN }}" | docker login \
-            -u "${{ env.REGISTRY_USER }}" \
+          echo "🔑 登录Docker Hub..."
+          echo "${{ env.DOCKERHUB_TOKEN }}" | docker login \
+            -u "${{ env.DOCKERHUB_USERNAME }}" \
             --password-stdin
-          echo "✔ 容器仓库认证成功"
+          echo "✅ 登录成功！"
 
       - name: 构建并推送镜像
         run: |
-          TAG="${{ inputs.target_repo }}:${{ inputs.image_tag }}"
-          echo "▌开始构建镜像：$TAG"
-          docker build -t $TAG -f ${{ inputs.dockerfile_path }} .
-          docker push $TAG
-          echo "✔ 镜像已推送至仓库"
+          IMAGE_NAME="${{ inputs.target_repo }}:${{ inputs.image_tag }}"
+          echo "🏗️ 构建镜像：$IMAGE_NAME"
+          docker build -t "$IMAGE_NAME" -f "${{ inputs.dockerfile_path }}" .
+          echo "🚀 推送镜像到Docker Hub..."
+          docker push "$IMAGE_NAME"
+          echo "✅ 镜像已推送：$IMAGE_NAME"
