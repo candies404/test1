@@ -1,0 +1,57 @@
+name: "Docker镜像自动化构建"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: '目标镜像仓库名称（如：myorg/myrepo）'
+        required: true
+        type: string
+      dockerfile_path:
+        description: 'Dockerfile相对路径（默认：./Dockerfile）'
+        required: false
+        type: string
+        default: 'Dockerfile'
+      dockerfile_content:
+        description: '直接写入Dockerfile内容（选填）'
+        required: false
+        type: string
+      image_tag:
+        description: '镜像标签（默认：latest）'
+        required: false
+        type: string
+        default: 'latest'
+
+env:
+  REGISTRY_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+  REGISTRY_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+jobs:
+  docker-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 获取代码
+        uses: actions/checkout@v4
+
+      - name: 准备构建环境
+        run: |
+          echo "▌验证Dockerfile位置：${{ inputs.dockerfile_path }}"
+          if [ -n "${{ inputs.dockerfile_content }}" ]; then
+            echo "${{ inputs.dockerfile_content }}" > ${{ inputs.dockerfile_path }}
+            echo "✔ 已生成动态Dockerfile"
+          fi
+
+      - name: 容器仓库认证
+        run: |
+          echo "${{ env.REGISTRY_TOKEN }}" | docker login \
+            -u "${{ env.REGISTRY_USER }}" \
+            --password-stdin
+          echo "✔ 容器仓库认证成功"
+
+      - name: 构建并推送镜像
+        run: |
+          TAG="${{ inputs.target_repo }}:${{ inputs.image_tag }}"
+          echo "▌开始构建镜像：$TAG"
+          docker build -t $TAG -f ${{ inputs.dockerfile_path }} .
+          docker push $TAG
+          echo "✔ 镜像已推送至仓库"
