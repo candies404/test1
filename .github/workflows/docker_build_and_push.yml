@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       target_repo:
-        description: '目标仓库地址（格式：owner/repo 或 https://github.com/owner/repo.git）'
+        description: '目标仓库地址（格式：owner/repo）'
         required: true
         type: string
       dockerfile_path:
@@ -17,7 +17,7 @@ on:
         required: false
         type: string
       image_name:
-        description: '镜像名（默认使用target_repo的仓库名）'
+        description: '镜像名（默认使用目标仓库名）'
         required: false
         type: string
       image_tag:
@@ -37,11 +37,7 @@ jobs:
       - name: 验证并克隆目标仓库
         run: |
           # 标准化仓库地址格式
-          if [[ "${{ inputs.target_repo }}" == http* ]]; then
-            repo_url="${{ inputs.target_repo }}"
-          else
-            repo_url="https://github.com/${{ inputs.target_repo }}.git"
-          fi
+          repo_url="https://github.com/${{ inputs.target_repo }}.git"
 
           # 检查仓库是否存在
           if ! git ls-remote --quiet "$repo_url" > /dev/null 2>&1; then
@@ -70,8 +66,15 @@ jobs:
 
       - name: 构建并推送镜像
         run: |
-          # 设置默认的镜像名称
-          IMAGE_NAME="${INPUT_image_name:-${{ inputs.target_repo##*/}}}"  # 提取仓库名部分
+          # 设置镜像名称
+          if [ -z "${{ inputs.image_name }}" ]; then
+            # 使用Docker Hub用户名作为前缀 + 仓库名作为默认镜像名
+            REPO_NAME=$(basename "${{ inputs.target_repo }}")
+            IMAGE_NAME="${{ env.DOCKERHUB_USERNAME }}/$REPO_NAME"
+          else
+            IMAGE_NAME="${{ inputs.image_name }}"
+          fi
+          
           TAG="$IMAGE_NAME:${{ inputs.image_tag }}"
           echo "开始构建镜像：$TAG"
           
