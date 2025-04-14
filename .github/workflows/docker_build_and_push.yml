@@ -13,11 +13,11 @@ on:
         type: string
         default: 'Dockerfile'
       dockerfile_content:
-        description: '直接写入Dockerfile内容（选填）'
+        description: 'Dockerfile内容'
         required: false
         type: string
       image_name:
-        description: '镜像名（选填，默认使用target_repo的仓库名）'
+        description: '镜像名（默认使用target_repo的仓库名）'
         required: false
         type: string
       image_tag:
