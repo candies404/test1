@@ -1,4 +1,4 @@
-name: "Docker镜像自动化构建"
+name: Docker镜像自动化构建
 
 on:
   workflow_dispatch:
