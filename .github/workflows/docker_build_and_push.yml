@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       target_repo:
-        description: '目标镜像仓库名称（如：myorg/myrepo）'
+        description: '目标仓库地址（格式：owner/repo 或 https://github.com/owner/repo.git）'
         required: true
         type: string
       dockerfile_path:
@@ -13,7 +13,7 @@ on:
         type: string
         default: 'Dockerfile'
       dockerfile_content:
-        description: 'Dockerfile内容'
+        description: 'Dockerfile内容（选填）'
         required: false
         type: string
       image_name:
@@ -27,15 +27,32 @@ on:
         default: 'latest'
 
 env:
-  REGISTRY_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-  REGISTRY_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
 jobs:
   docker-pipeline:
     runs-on: ubuntu-latest
     steps:
-      - name: 获取代码
-        uses: actions/checkout@v4
+      - name: 验证并克隆目标仓库
+        run: |
+          # 标准化仓库地址格式
+          if [[ "${{ inputs.target_repo }}" == http* ]]; then
+            repo_url="${{ inputs.target_repo }}"
+          else
+            repo_url="https://github.com/${{ inputs.target_repo }}.git"
+          fi
+
+          # 检查仓库是否存在
+          if ! git ls-remote --quiet "$repo_url" > /dev/null 2>&1; then
+            echo "::error::仓库不存在或无权访问: $repo_url"
+            exit 1
+          fi
+          
+          echo "正在克隆仓库..."
+          git clone "$repo_url" ./source
+          cd ./source
+          echo "✔ 仓库克隆完成"
 
       - name: 准备构建环境
         run: |
@@ -45,19 +62,19 @@ jobs:
             echo "✔ 已生成动态Dockerfile"
           fi
 
-      - name: 容器仓库认证
-        run: |
-          echo "${{ env.REGISTRY_TOKEN }}" | docker login \
-            -u "${{ env.REGISTRY_USER }}" \
-            --password-stdin
-          echo "✔ 容器仓库认证成功"
+      - name: 登录 Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
 
       - name: 构建并推送镜像
         run: |
-          # 设置默认的registry地址（如果未提供则使用target_repo）
-          REGISTRY="${INPUT_image_name:-${{ inputs.target_repo }}}"
-          TAG="$REGISTRY:${{ inputs.image_tag }}"
+          # 设置默认的镜像名称
+          IMAGE_NAME="${INPUT_image_name:-${{ inputs.target_repo##*/}}}"  # 提取仓库名部分
+          TAG="$IMAGE_NAME:${{ inputs.image_tag }}"
           echo "开始构建镜像：$TAG"
+          
           docker build -t $TAG -f ${{ inputs.dockerfile_path }} .
           docker push $TAG
           echo "✔ 镜像已推送至仓库"
