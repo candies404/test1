@@ -47,12 +47,19 @@ jobs:
       - name: 准备构建环境
         working-directory: ./source
         run: |
-          echo "验证Dockerfile位置：${{ github.event.inputs.dockerfile_path }}"
-          if [ -n "${{ github.event.inputs.dockerfile_content_base64 }}" ]; then
+            echo "验证Dockerfile位置：${{ github.event.inputs.dockerfile_path }}"
+            if [ -n "${{ github.event.inputs.dockerfile_content_base64 }}" ]; then
             mkdir -p $(dirname "${{ github.event.inputs.dockerfile_path }}")
             echo "${{ github.event.inputs.dockerfile_content_base64 }}" | base64 -d > "${{ github.event.inputs.dockerfile_path }}"
             echo "✔ 已生成动态Dockerfile"
-          fi
+            fi
+            
+            # 检查镜像名称是否包含路径，如果有则创建对应目录
+            if [ -n "${{ github.event.inputs.image_name }}" ] && [[ "${{ github.event.inputs.image_name }}" == */* ]]; then
+            IMAGE_PATH=$(dirname "${{ github.event.inputs.image_name }}")
+            mkdir -p "$IMAGE_PATH"
+            echo "✔ 已创建镜像路径目录: $IMAGE_PATH"
+            fi
 
       - name: 登录 Docker Hub
         uses: docker/login-action@v3
@@ -63,15 +70,20 @@ jobs:
       - name: 构建并推送镜像
         working-directory: ./source
         run: |
-          if [ -z "${{ github.event.inputs.image_name }}" ]; then
-            REPO_NAME=$(basename "${{ github.event.inputs.target_repo }}")
-            IMAGE_NAME="${{ env.DOCKERHUB_USERNAME }}/$REPO_NAME"
-          else
-            IMAGE_NAME="${{ github.event.inputs.image_name }}"
-          fi
-          
-          TAG="$IMAGE_NAME:${{ github.event.inputs.image_tag }}"
-          echo "开始构建镜像：$TAG"
-          docker build -t $TAG -f "${{ github.event.inputs.dockerfile_path }}" .
-          docker push $TAG
-          echo "✔ 镜像已推送至仓库"
+            # 确定镜像名称
+            if [ -z "${{ github.event.inputs.image_name }}" ]; then
+                REPO_NAME=$(basename "${{ github.event.inputs.target_repo }}")
+                IMAGE_NAME="${{ env.DOCKERHUB_USERNAME }}/$REPO_NAME"
+            else
+                IMAGE_NAME="${{ github.event.inputs.image_name }}"
+            fi
+            
+            # 构建并推送镜像
+            FULL_IMAGE_NAME="$IMAGE_NAME:${{ github.event.inputs.image_tag }}"
+            echo "开始构建镜像：$FULL_IMAGE_NAME"
+            docker build -t $FULL_IMAGE_NAME -f "${{ github.event.inputs.dockerfile_path }}" .
+            echo "✔ 镜像构建完成"
+            
+            echo "开始推送镜像..."
+            docker push $FULL_IMAGE_NAME
+            echo "✔ 镜像已推送至 Docker Hub"
