@@ -103,9 +103,9 @@ jobs:
             local timestamp
             timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
             case $level in
-              "INFO") echo -e "${COLOR_OK}[${timestamp}] INFO: ${message}${COLOR_RESET}" >&2 ;;
-              "WARN") echo -e "${COLOR_WARN}[${timestamp}] WARN: ${message}${COLOR_RESET}" >&2 ;;
-              "ERROR") echo -e "${COLOR_ERR}[${timestamp}] ERROR: ${message}${COLOR_RESET}" >&2 ;;
+                "INFO") echo -e "${COLOR_OK}[${timestamp}] INFO: ${message}${COLOR_RESET}" >&2 ;;
+                "WARN") echo -e "${COLOR_WARN}[${timestamp}] WARN: ${message}${COLOR_RESET}" >&2 ;;
+                "ERROR") echo -e "${COLOR_ERR}[${timestamp}] ERROR: ${message}${COLOR_RESET}" >&2 ;;
             esac
           }
 
@@ -252,12 +252,16 @@ jobs:
                 fi
               elif [[ "$function_name" == "get_digest" ]]; then
                 if digest=$(skopeo inspect --creds "${DOCKERHUB_USER}:${DOCKERHUB_TOKEN}" --format '{{.Digest}}' "docker://$src_image" 2>/dev/null); then
-                  result="$digest"
-                  success=true
-                  log "INFO" "成功从 $mirror 获取镜像摘要"
-                  break
+                    if [[ -n "$digest" ]]; then
+                    result="$digest"
+                    success=true
+                    log "INFO" "成功从 $mirror 获取镜像摘要: $digest"
+                    break
+                    else
+                    log "WARN" "从 $mirror 获取到空摘要，尝试下一个镜像源"
+                    fi
                 else
-                  log "WARN" "从 $mirror 获取镜像摘要失败，尝试下一个镜像源"
+                    log "WARN" "从 $mirror 获取镜像摘要失败，尝试下一个镜像源"
                 fi
               elif [[ "$function_name" == "sync" ]]; then
                 local dst_image="$2"
