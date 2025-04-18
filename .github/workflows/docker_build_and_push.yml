@@ -75,7 +75,12 @@ jobs:
                 REPO_NAME=$(basename "${{ github.event.inputs.target_repo }}")
                 IMAGE_NAME="${{ env.DOCKERHUB_USERNAME }}/$REPO_NAME"
             else
-                IMAGE_NAME="${{ github.event.inputs.image_name }}"
+                # 检查是否已经包含用户名前缀
+                if [[ "${{ github.event.inputs.image_name }}" != *"/"* ]]; then
+                    IMAGE_NAME="${{ env.DOCKERHUB_USERNAME }}/${{ github.event.inputs.image_name }}"
+                else
+                    IMAGE_NAME="${{ github.event.inputs.image_name }}"
+                fi
             fi
             
             # 构建并推送镜像
