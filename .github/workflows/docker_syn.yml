@@ -18,7 +18,10 @@ jobs:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
       DEST_REPO: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKER_SYNC_MAPPINGS: ${{ vars.DOCKER_SYNC_MAPPINGS }}
+      # 添加镜像源环境变量，每行一个
       DOCKER_MIRRORS: ${{ vars.DOCKER_MIRRORS }}
+      # docker.io 作为保底镜像源
+      DEFAULT_MIRROR: docker.io
       BUILDKIT_PROGRESS: plain
 
     steps:
@@ -35,7 +38,7 @@ jobs:
           fi
 
           # 清理特殊字符并校验格式
-          CLEAN_MAPPINGS=$(echo "$PROCESSED_MAPPINGS" | tr -d '\r\n' | tr -s ' ' | sed -e 's/ //g' -e 's/,+/,/g' -e 's/\*//g')
+          CLEAN_MAPPINGS=$(echo "$PROCESSED_MAPPINGS" | tr -d '\n' | tr -s ' ' | sed -e 's/ //g' -e 's/,+/,/g')
           if [ -z "$CLEAN_MAPPINGS" ]; then
             echo "::error::未配置同步映射，请设置DOCKER_SYNC_MAPPINGS环境变量或手动输入"
             exit 1
@@ -49,15 +52,13 @@ jobs:
 
           echo "SYNC_MAPPINGS=${CLEAN_MAPPINGS}" >> $GITHUB_ENV
           
-          # 处理Docker镜像源
+          # 处理镜像源配置
           if [ -n "$DOCKER_MIRRORS" ]; then
-            # 转换每行一个的格式为逗号分隔，并移除特殊字符和空项
-            CLEAN_MIRRORS=$(echo "$DOCKER_MIRRORS" | tr '\r\n' ',' | sed -e 's/\*//g' | sed -e 's/,,*/,/g' -e 's/^,//g' -e 's/,$//g')
-            echo "DOCKER_MIRROR_LIST=${CLEAN_MIRRORS}" >> $GITHUB_ENV
-            echo "已配置Docker镜像源: ${CLEAN_MIRRORS}"
+            echo "已配置镜像源环境变量"
+            echo "AVAILABLE_MIRRORS=${DOCKER_MIRRORS//$'\n'/,}" >> $GITHUB_ENV
           else
-            echo "DOCKER_MIRROR_LIST=" >> $GITHUB_ENV
-            echo "未配置Docker镜像源，将直接使用docker.io"
+            echo "未配置镜像源，将使用默认镜像源 docker.io"
+            echo "AVAILABLE_MIRRORS=$DEFAULT_MIRROR" >> $GITHUB_ENV
           fi
 
       - name: 设置多架构构建环境
@@ -103,9 +104,9 @@ jobs:
             local timestamp
             timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
             case $level in
-                "INFO") echo -e "${COLOR_OK}[${timestamp}] INFO: ${message}${COLOR_RESET}" >&2 ;;
-                "WARN") echo -e "${COLOR_WARN}[${timestamp}] WARN: ${message}${COLOR_RESET}" >&2 ;;
-                "ERROR") echo -e "${COLOR_ERR}[${timestamp}] ERROR: ${message}${COLOR_RESET}" >&2 ;;
+              "INFO") echo -e "${COLOR_OK}[${timestamp}] INFO: ${message}${COLOR_RESET}" >&2 ;;
+              "WARN") echo -e "${COLOR_WARN}[${timestamp}] WARN: ${message}${COLOR_RESET}" >&2 ;;
+              "ERROR") echo -e "${COLOR_ERR}[${timestamp}] ERROR: ${message}${COLOR_RESET}" >&2 ;;
             esac
           }
 
@@ -114,18 +115,40 @@ jobs:
           skipped_images=""
           failed_images=""
           
-          # 处理Docker镜像源列表
-          IFS=',' read -ra DOCKER_MIRROR_ARRAY <<< "$DOCKER_MIRROR_LIST"
-          # 过滤掉空值
-          FILTERED_MIRRORS=()
-          for mirror in "${DOCKER_MIRROR_ARRAY[@]}"; do
-            if [[ -n "$mirror" ]]; then
-              FILTERED_MIRRORS+=("$mirror")
+          # 处理镜像源列表
+          IFS=',' read -ra MIRRORS <<< "$AVAILABLE_MIRRORS"
+          log "INFO" "已配置的镜像源: ${MIRRORS[*]}"
+          
+          # 设置默认镜像源
+          DEFAULT_MIRROR="docker.io"
+
+          # 获取可用的镜像源
+          get_available_mirror() {
+            local image=$1
+            local available_mirror=""
+            
+            # 先尝试所有配置的镜像源
+            for mirror in "${MIRRORS[@]}"; do
+              local mirror_image="${image/docker.io/$mirror}"
+              log "INFO" "尝试镜像源: ${COLOR_SRC}$mirror${COLOR_RESET} → ${COLOR_DST}$mirror_image"
+              
+              if timeout 10s skopeo inspect --creds "${DOCKERHUB_USER}:${DOCKERHUB_TOKEN}" "docker://$mirror_image" &>/dev/null; then
+                log "INFO" "镜像源 ${COLOR_OK}$mirror${COLOR_RESET} 可用"
+                available_mirror="$mirror"
+                break
+              else
+                log "WARN" "镜像源 ${COLOR_WARN}$mirror${COLOR_RESET} 不可用，尝试下一个"
+              fi
+            done
+            
+            # 如果所有镜像源都失效，使用保底源 docker.io
+            if [ -z "$available_mirror" ]; then
+              log "WARN" "所有镜像源不可用，使用保底源 ${COLOR_WARN}$DEFAULT_MIRROR${COLOR_RESET}"
+              available_mirror="$DEFAULT_MIRROR"
             fi
-          done
-          # 默认添加官方Docker源作为最后的备选项
-          FILTERED_MIRRORS+=("docker.io")
-          log "INFO" "配置的Docker镜像源: ${FILTERED_MIRRORS[*]}"
+            
+            echo "$available_mirror"
+          }
 
           # 解析环境变量到关联数组
           declare -A SYNC_MAP=()
@@ -133,34 +156,16 @@ jobs:
           for pair in "${MAPPING_PAIRS[@]}"; do
             key="${pair%%=*}"
             value="${pair#*=}"
-            # 清理掉可能的特殊字符
-            key=$(echo "$key" | tr -d '\r\n\t*')
-            value=$(echo "$value" | tr -d '\r\n\t*')
             if [[ -z "$key" || -z "$value" ]]; then
               log "ERROR" "无效的映射对: $pair"
               exit 1
             fi
-            # 检查名称格式是否合法
-            if [[ ! "$key" =~ ^[a-zA-Z0-9][-a-zA-Z0-9_./]+:[a-zA-Z0-9_.-]+$ ]]; then
-              log "WARN" "源镜像名称格式可能不正确: $key，尝试规范化"
-              # 尝试规范化名称
-              key=$(echo "$key" | sed 's/[^a-zA-Z0-9\/_.-:]//g')
-            fi
-            if [[ ! "$value" =~ ^[a-zA-Z0-9][-a-zA-Z0-9_./]+:[a-zA-Z0-9_.-]+$ ]]; then
-              log "WARN" "目标镜像名称格式可能不正确: $value，尝试规范化"
-              # 尝试规范化名称
-              value=$(echo "$value" | sed 's/[^a-zA-Z0-9\/_.-:]//g')
-            fi
-            log "INFO" "添加映射: $key -> $value"
             SYNC_MAP["$key"]="$value"
           done
 
           normalize_image() {
-            local image_ref=$1 default_tag=$2 context=$3 registry=$4
+            local image_ref=$1 default_tag=$2 context=$3 mirror=$4
             local image_name image_tag
-
-            # 清理输入中可能的特殊字符
-            image_ref=$(echo "$image_ref" | tr -d '\r\n\t*')
 
             if [[ "$image_ref" == *":"* ]]; then
               image_name="${image_ref%:*}"
@@ -172,10 +177,12 @@ jobs:
 
             case $context in
               "source")
-                if [[ "$registry" == "docker.io" && "$image_name" != *"/"* ]]; then
-                  printf "%s/library/%s:%s" "$registry" "$image_name" "$image_tag"
+                if [[ "$image_name" == *"/"* ]]; then
+                  # 应用镜像源替换
+                  printf "%s/%s:%s" "$mirror" "$image_name" "$image_tag"
                 else
-                  printf "%s/%s:%s" "$registry" "$image_name" "$image_tag"
+                  # library 镜像，应用镜像源替换
+                  printf "%s/library/%s:%s" "$mirror" "$image_name" "$image_tag"
                 fi
                 ;;
               "target")
@@ -240,129 +247,56 @@ jobs:
           sync_image() {
             local src=$1 dst=$2
             log "INFO" "启动同步：${COLOR_SRC}$src → ${COLOR_DST}$dst"
-            log "INFO" "执行命令: skopeo copy --all --src-creds \${DOCKERHUB_USER}:\${DOCKERHUB_TOKEN} --dest-creds \${DOCKERHUB_USER}:\${DOCKERHUB_TOKEN} docker://$src docker://$dst"
             skopeo copy --all --src-creds "${DOCKERHUB_USER}:${DOCKERHUB_TOKEN}" \
                         --dest-creds "${DOCKERHUB_USER}:${DOCKERHUB_TOKEN}" \
                         "docker://$src" "docker://$dst" || {
-                local exit_code=$?
-                log "ERROR" "同步失败，退出码: $exit_code"
+                log "ERROR" "同步失败"
                 return 1
             }
             log "INFO" "同步完成"
           }
 
-          try_with_mirrors() {
-            local source_ref=$1
-            local function_name=$2
-            local success=false
-            local result=""
-            local original_image=""
-            
-            # 使用循环尝试每个镜像源
-            for mirror in "${FILTERED_MIRRORS[@]}"; do
-              log "INFO" "尝试使用镜像源: $mirror"
-              local src_image=$(normalize_image "$source_ref" "latest" "source" "$mirror")
-              
-              # 保存原始镜像引用（第一次迭代时）
-              if [[ -z "$original_image" ]]; then
-                original_image="$src_image"
-              fi
-              
-              if [[ "$function_name" == "get_architecture" ]]; then
-                if arch=$(get_architecture "$src_image" 2>/dev/null); then
-                  result="$arch"
-                  success=true
-                  log "INFO" "成功从 $mirror 获取架构信息"
-                  break
-                else
-                  log "WARN" "从 $mirror 获取架构信息失败，尝试下一个镜像源"
-                fi
-              elif [[ "$function_name" == "get_digest" ]]; then
-                if digest=$(skopeo inspect --creds "${DOCKERHUB_USER}:${DOCKERHUB_TOKEN}" --format '{{.Digest}}' "docker://$src_image" 2>/dev/null); then
-                    if [[ -n "$digest" ]]; then
-                    result="$digest"
-                    success=true
-                    log "INFO" "成功从 $mirror 获取镜像摘要: $digest"
-                    break
-                    else
-                    log "WARN" "从 $mirror 获取到空摘要，尝试下一个镜像源"
-                    fi
-                else
-                    log "WARN" "从 $mirror 获取镜像摘要失败，尝试下一个镜像源"
-                fi
-              elif [[ "$function_name" == "sync" ]]; then
-                local dst_image="$2"
-                if sync_image "$src_image" "$dst_image"; then
-                  success=true
-                  log "INFO" "使用 $mirror 镜像源同步成功"
-                  break
-                else
-                  log "WARN" "使用 $mirror 镜像源同步失败，尝试下一个镜像源"
-                fi
-              fi
-            done
-            
-            if ! $success; then
-              log "ERROR" "所有镜像源都失败: $original_image"
-              return 1
-            fi
-            
-            echo "$result"
-            return 0
-          }
-
           # 处理同步循环
           for source_ref in "${!SYNC_MAP[@]}"; do
             echo "::group::🔄 Processing $source_ref"
+            
+            # 获取可用的镜像源
+            available_mirror=$(get_available_mirror "$source_ref")
+            log "INFO" "使用镜像源: ${COLOR_OK}$available_mirror${COLOR_RESET}"
+            
+            src_image=$(normalize_image "$source_ref" "latest" "source" "$available_mirror")
             dst_ref="${SYNC_MAP[$source_ref]}"
-            dst_image=$(normalize_image "$dst_ref" "latest" "target" "docker.io")
+            dst_image=$(normalize_image "$dst_ref" "$(cut -d: -f2 <<< "$src_image")" "target" "docker.io")
 
             echo -e "${COLOR_OK}架构对比报告：${COLOR_RESET}"
 
-            # 使用镜像源尝试获取源镜像架构
-            src_arch=$(try_with_mirrors "$source_ref" "get_architecture")
-            if [[ $? -ne 0 ]]; then
-              log "ERROR" "无法获取源镜像架构信息"
-              failed_images+="❌ \`${source_ref}\` → \`${dst_ref}\` (无法获取源镜像架构)\n"
-              echo "::endgroup::"
-              continue
-            fi
-
-            # 检查目标镜像是否存在
+            # 新增输出过滤 ↓ 确保捕获正确架构信息
+            src_arch=$(get_architecture "$src_image" | tail -1)
             if target_info=$(skopeo inspect --creds "${DOCKERHUB_USER}:${DOCKERHUB_TOKEN}" "docker://$dst_image" 2>/dev/null); then
-              dst_arch=$(get_architecture "$dst_image" 2>/dev/null || echo "N/A")
+              dst_arch=$(get_architecture "$dst_image" | tail -1)
               dst_exists=true
-              dst_digest=$(jq -r '.Digest' <<< "$target_info")
             else
               dst_arch="N/A"
               dst_exists=false
-              dst_digest="N/A"
             fi
 
-            # 使用镜像源尝试获取源镜像摘要
-            src_digest=$(try_with_mirrors "$source_ref" "get_digest")
-            if [[ $? -ne 0 ]]; then
-              log "ERROR" "无法获取源镜像摘要"
-              failed_images+="❌ \`${source_ref}\` → \`${dst_ref}\` (无法获取源镜像摘要)\n"
-              echo "::endgroup::"
-              continue
+            src_digest=$(skopeo inspect --creds "${DOCKERHUB_USER}:${DOCKERHUB_TOKEN}" --format '{{.Digest}}' "docker://$src_image")
+            if $dst_exists; then
+                dst_digest=$(jq -r '.Digest' <<< "$target_info")
+                if [[ "$dst_digest" == "$src_digest" ]]; then
+                    log "INFO" "源Digest: ${COLOR_SRC}$src_digest${COLOR_RESET}"
+                    log "INFO" "目标Digest: ${COLOR_DST}$dst_digest${COLOR_RESET}"
+                    log "INFO" "目标镜像已是最新，跳过同步"
+                    skipped_images+="🔜 从 ${available_mirror} 同步: ${src_image} → ${dst_image}\n"
+                    echo "::endgroup::"
+                    continue
+                fi
             fi
 
-            # 检查是否需要同步
-            if $dst_exists && [[ "$dst_digest" == "$src_digest" ]]; then
-              log "INFO" "源Digest: ${COLOR_SRC}$src_digest${COLOR_RESET}"
-              log "INFO" "目标Digest: ${COLOR_DST}$dst_digest${COLOR_RESET}"
-              log "INFO" "目标镜像已是最新，跳过同步"
-              skipped_images+="🔜 ${source_ref} → ${dst_ref}\n"
-              echo "::endgroup::"
-              continue
-            fi
-
-            # 执行同步
-            if try_with_mirrors "$source_ref" "sync" "$dst_image"; then
-              success_images+="✅ \`${source_ref}\` → \`${dst_ref}\`\n"
+            if sync_image "$src_image" "$dst_image"; then
+              success_images+="✅ 从 ${available_mirror} 同步: \`${src_image}\` → \`${dst_image}\`\n"
             else
-              failed_images+="❌ \`${source_ref}\` → \`${dst_ref}\`\n"
+              failed_images+="❌ 从 ${available_mirror} 同步: \`${src_image}\` → \`${dst_image}\`\n"
             fi
 
             echo "::endgroup::"
