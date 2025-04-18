@@ -18,7 +18,7 @@ jobs:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
       DEST_REPO: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKER_SYNC_MAPPINGS: ${{ vars.DOCKER_SYNC_MAPPINGS }}
-      # 添加镜像源环境变量，每行一个
+      # 添加镜像源环境变量，多个用换行分隔
       DOCKER_MIRRORS: ${{ vars.DOCKER_MIRRORS }}
       # docker.io 作为保底镜像源
       DEFAULT_MIRROR: docker.io
@@ -38,7 +38,7 @@ jobs:
           fi
 
           # 清理特殊字符并校验格式
-          CLEAN_MAPPINGS=$(echo "$PROCESSED_MAPPINGS" | tr -d '\n' | tr -s ' ' | sed -e 's/ //g' -e 's/,+/,/g')
+          CLEAN_MAPPINGS=$(echo "$PROCESSED_MAPPINGS" | tr -d '\r' | tr -s ' ' | sed -e 's/ //g' -e 's/,+/,/g')
           if [ -z "$CLEAN_MAPPINGS" ]; then
             echo "::error::未配置同步映射，请设置DOCKER_SYNC_MAPPINGS环境变量或手动输入"
             exit 1
@@ -50,12 +50,15 @@ jobs:
             exit 1
           fi
 
+          # 保存清理后的同步映射
           echo "SYNC_MAPPINGS=${CLEAN_MAPPINGS}" >> $GITHUB_ENV
           
-          # 处理镜像源配置
+          # 处理镜像源配置 - 确保移除所有 \r 字符
           if [ -n "$DOCKER_MIRRORS" ]; then
-            echo "已配置镜像源环境变量"
-            echo "AVAILABLE_MIRRORS=${DOCKER_MIRRORS//$'\n'/,}" >> $GITHUB_ENV
+            # 清理镜像源中的换行符和回车符，转换为逗号分隔列表
+            CLEAN_MIRRORS=$(echo "$DOCKER_MIRRORS" | tr -d '\r' | tr '\n' ',' | sed 's/,$//')
+            echo "已配置镜像源: $CLEAN_MIRRORS"
+            echo "AVAILABLE_MIRRORS=${CLEAN_MIRRORS}" >> $GITHUB_ENV
           else
             echo "未配置镜像源，将使用默认镜像源 docker.io"
             echo "AVAILABLE_MIRRORS=$DEFAULT_MIRROR" >> $GITHUB_ENV
@@ -129,6 +132,12 @@ jobs:
             
             # 先尝试所有配置的镜像源
             for mirror in "${MIRRORS[@]}"; do
+              # 确保镜像源没有多余的空格或换行符
+              mirror=$(echo "$mirror" | tr -d '[:space:]')
+              if [ -z "$mirror" ]; then
+                continue
+              fi
+              
               local mirror_image="${image/docker.io/$mirror}"
               log "INFO" "尝试镜像源: ${COLOR_SRC}$mirror${COLOR_RESET} → ${COLOR_DST}$mirror_image"
               
@@ -160,6 +169,9 @@ jobs:
               log "ERROR" "无效的映射对: $pair"
               exit 1
             fi
+            # 确保键值没有多余的空格或换行符
+            key=$(echo "$key" | tr -d '[:space:]')
+            value=$(echo "$value" | tr -d '[:space:]')
             SYNC_MAP["$key"]="$value"
           done
 
@@ -167,6 +179,9 @@ jobs:
             local image_ref=$1 default_tag=$2 context=$3 mirror=$4
             local image_name image_tag
 
+            # 确保镜像名称没有特殊字符
+            image_ref=$(echo "$image_ref" | tr -d '\r')
+            
             if [[ "$image_ref" == *":"* ]]; then
               image_name="${image_ref%:*}"
               image_tag="${image_ref#*:}"
@@ -270,17 +285,27 @@ jobs:
 
             echo -e "${COLOR_OK}架构对比报告：${COLOR_RESET}"
 
-            # 新增输出过滤 ↓ 确保捕获正确架构信息
-            src_arch=$(get_architecture "$src_image" | tail -1)
+            # 先尝试获取源镜像信息
+            if ! src_arch=$(get_architecture "$src_image" | tail -1 2>/dev/null); then
+              log "ERROR" "无法获取源镜像架构信息，可能镜像不存在或无法访问"
+              failed_images+="❌ 源镜像不可访问: \`${src_image}\`\n"
+              echo "::endgroup::"
+              continue
+            fi
+            
+            # 尝试获取目标镜像信息
             if target_info=$(skopeo inspect --creds "${DOCKERHUB_USER}:${DOCKERHUB_TOKEN}" "docker://$dst_image" 2>/dev/null); then
               dst_arch=$(get_architecture "$dst_image" | tail -1)
               dst_exists=true
             else
+              log "INFO" "目标镜像不存在，将创建新镜像"
               dst_arch="N/A"
               dst_exists=false
             fi
 
+            # 获取源镜像的摘要
             src_digest=$(skopeo inspect --creds "${DOCKERHUB_USER}:${DOCKERHUB_TOKEN}" --format '{{.Digest}}' "docker://$src_image")
+            
             if $dst_exists; then
                 dst_digest=$(jq -r '.Digest' <<< "$target_info")
                 if [[ "$dst_digest" == "$src_digest" ]]; then
