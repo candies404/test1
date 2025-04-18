@@ -334,7 +334,6 @@ jobs:
             notification_content+="🎉 **同步成功**：\n${success_images}\n"
             echo "HAS_SUCCESS=true" >> $GITHUB_ENV
           else
-            notification_content+="🎉 **同步成功**：无\n\n"
             echo "HAS_SUCCESS=false" >> $GITHUB_ENV
           fi
 
