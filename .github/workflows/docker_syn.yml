@@ -35,7 +35,7 @@ jobs:
           fi
 
           # 清理特殊字符并校验格式
-          CLEAN_MAPPINGS=$(echo "$PROCESSED_MAPPINGS" | tr -d '\n' | tr -s ' ' | sed -e 's/ //g' -e 's/,+/,/g')
+          CLEAN_MAPPINGS=$(echo "$PROCESSED_MAPPINGS" | tr -d '\r\n' | tr -s ' ' | sed -e 's/ //g' -e 's/,+/,/g' -e 's/\*//g')
           if [ -z "$CLEAN_MAPPINGS" ]; then
             echo "::error::未配置同步映射，请设置DOCKER_SYNC_MAPPINGS环境变量或手动输入"
             exit 1
@@ -51,8 +51,8 @@ jobs:
           
           # 处理Docker镜像源
           if [ -n "$DOCKER_MIRRORS" ]; then
-            # 转换每行一个的格式为逗号分隔
-            CLEAN_MIRRORS=$(echo "$DOCKER_MIRRORS" | tr '\n' ',' | sed 's/,$//')
+            # 转换每行一个的格式为逗号分隔，并移除特殊字符
+            CLEAN_MIRRORS=$(echo "$DOCKER_MIRRORS" | tr '\r\n' ',' | sed -e 's/,$//' -e 's/\*//g')
             echo "DOCKER_MIRROR_LIST=${CLEAN_MIRRORS}" >> $GITHUB_ENV
             echo "已配置Docker镜像源: ${CLEAN_MIRRORS}"
           else
@@ -126,16 +126,23 @@ jobs:
           for pair in "${MAPPING_PAIRS[@]}"; do
             key="${pair%%=*}"
             value="${pair#*=}"
+            # 清理掉可能的特殊字符
+            key=$(echo "$key" | tr -d '\r\n\t*')
+            value=$(echo "$value" | tr -d '\r\n\t*')
             if [[ -z "$key" || -z "$value" ]]; then
               log "ERROR" "无效的映射对: $pair"
               exit 1
             fi
+            log "INFO" "添加映射: $key -> $value"
             SYNC_MAP["$key"]="$value"
           done
 
           normalize_image() {
             local image_ref=$1 default_tag=$2 context=$3 registry=$4
             local image_name image_tag
+
+            # 清理输入中可能的特殊字符
+            image_ref=$(echo "$image_ref" | tr -d '\r\n\t*')
 
             if [[ "$image_ref" == *":"* ]]; then
               image_name="${image_ref%:*}"
@@ -215,10 +222,12 @@ jobs:
           sync_image() {
             local src=$1 dst=$2
             log "INFO" "启动同步：${COLOR_SRC}$src → ${COLOR_DST}$dst"
+            log "INFO" "执行命令: skopeo copy --all --src-creds \${DOCKERHUB_USER}:\${DOCKERHUB_TOKEN} --dest-creds \${DOCKERHUB_USER}:\${DOCKERHUB_TOKEN} docker://$src docker://$dst"
             skopeo copy --all --src-creds "${DOCKERHUB_USER}:${DOCKERHUB_TOKEN}" \
                         --dest-creds "${DOCKERHUB_USER}:${DOCKERHUB_TOKEN}" \
                         "docker://$src" "docker://$dst" || {
-                log "ERROR" "同步失败"
+                local exit_code=$?
+                log "ERROR" "同步失败，退出码: $exit_code"
                 return 1
             }
             log "INFO" "同步完成"
