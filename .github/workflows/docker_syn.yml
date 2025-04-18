@@ -51,8 +51,8 @@ jobs:
           
           # 处理Docker镜像源
           if [ -n "$DOCKER_MIRRORS" ]; then
-            # 转换每行一个的格式为逗号分隔，并移除特殊字符
-            CLEAN_MIRRORS=$(echo "$DOCKER_MIRRORS" | tr '\r\n' ',' | sed -e 's/,$//' -e 's/\*//g')
+            # 转换每行一个的格式为逗号分隔，并移除特殊字符和空项
+            CLEAN_MIRRORS=$(echo "$DOCKER_MIRRORS" | tr '\r\n' ',' | sed -e 's/\*//g' | sed -e 's/,,*/,/g' -e 's/^,//g' -e 's/,$//g')
             echo "DOCKER_MIRROR_LIST=${CLEAN_MIRRORS}" >> $GITHUB_ENV
             echo "已配置Docker镜像源: ${CLEAN_MIRRORS}"
           else
@@ -116,9 +116,16 @@ jobs:
           
           # 处理Docker镜像源列表
           IFS=',' read -ra DOCKER_MIRROR_ARRAY <<< "$DOCKER_MIRROR_LIST"
+          # 过滤掉空值
+          FILTERED_MIRRORS=()
+          for mirror in "${DOCKER_MIRROR_ARRAY[@]}"; do
+            if [[ -n "$mirror" ]]; then
+              FILTERED_MIRRORS+=("$mirror")
+            fi
+          done
           # 默认添加官方Docker源作为最后的备选项
-          DOCKER_MIRROR_ARRAY+=("docker.io")
-          log "INFO" "配置的Docker镜像源: ${DOCKER_MIRROR_ARRAY[*]}"
+          FILTERED_MIRRORS+=("docker.io")
+          log "INFO" "配置的Docker镜像源: ${FILTERED_MIRRORS[*]}"
 
           # 解析环境变量到关联数组
           declare -A SYNC_MAP=()
@@ -132,6 +139,17 @@ jobs:
             if [[ -z "$key" || -z "$value" ]]; then
               log "ERROR" "无效的映射对: $pair"
               exit 1
+            fi
+            # 检查名称格式是否合法
+            if [[ ! "$key" =~ ^[a-zA-Z0-9][-a-zA-Z0-9_./]+:[a-zA-Z0-9_.-]+$ ]]; then
+              log "WARN" "源镜像名称格式可能不正确: $key，尝试规范化"
+              # 尝试规范化名称
+              key=$(echo "$key" | sed 's/[^a-zA-Z0-9\/_.-:]//g')
+            fi
+            if [[ ! "$value" =~ ^[a-zA-Z0-9][-a-zA-Z0-9_./]+:[a-zA-Z0-9_.-]+$ ]]; then
+              log "WARN" "目标镜像名称格式可能不正确: $value，尝试规范化"
+              # 尝试规范化名称
+              value=$(echo "$value" | sed 's/[^a-zA-Z0-9\/_.-:]//g')
             fi
             log "INFO" "添加映射: $key -> $value"
             SYNC_MAP["$key"]="$value"
@@ -154,10 +172,10 @@ jobs:
 
             case $context in
               "source")
-                if [[ "$image_name" == *"/"* ]]; then
-                  printf "%s/%s:%s" "$registry" "$image_name" "$image_tag"
-                else
+                if [[ "$registry" == "docker.io" && "$image_name" != *"/"* ]]; then
                   printf "%s/library/%s:%s" "$registry" "$image_name" "$image_tag"
+                else
+                  printf "%s/%s:%s" "$registry" "$image_name" "$image_tag"
                 fi
                 ;;
               "target")
@@ -241,7 +259,7 @@ jobs:
             local original_image=""
             
             # 使用循环尝试每个镜像源
-            for mirror in "${DOCKER_MIRROR_ARRAY[@]}"; do
+            for mirror in "${FILTERED_MIRRORS[@]}"; do
               log "INFO" "尝试使用镜像源: $mirror"
               local src_image=$(normalize_image "$source_ref" "latest" "source" "$mirror")
               
