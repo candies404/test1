@@ -70,16 +70,19 @@ jobs:
       - name: 构建并推送镜像
         working-directory: ./source
         run: |
-            # 确定镜像名称
+            # 确定镜像名称（强制小写处理）
             if [ -z "${{ github.event.inputs.image_name }}" ]; then
-                REPO_NAME=$(basename "${{ github.event.inputs.target_repo }}")
+                # 从目标仓库获取名称并转换为全小写
+                REPO_NAME=$(basename "${{ github.event.inputs.target_repo }}" | tr '[:upper:]' '[:lower:]')
                 IMAGE_NAME="${{ env.DOCKERHUB_USERNAME }}/$REPO_NAME"
             else
-                # 检查是否已经包含用户名前缀
-                if [[ "${{ github.event.inputs.image_name }}" != *"/"* ]]; then
-                    IMAGE_NAME="${{ env.DOCKERHUB_USERNAME }}/${{ github.event.inputs.image_name }}"
+                # 将用户输入的镜像名称统一转为小写
+                LOWER_NAME=$(echo "${{ github.event.inputs.image_name }}" | tr '[:upper:]' '[:lower:]')
+                # 如果用户名前缀不存在则自动添加
+                if [[ "$LOWER_NAME" != *"/"* ]]; then
+                    IMAGE_NAME="${{ env.DOCKERHUB_USERNAME }}/$LOWER_NAME"
                 else
-                    IMAGE_NAME="${{ github.event.inputs.image_name }}"
+                    IMAGE_NAME="$LOWER_NAME"
                 fi
             fi
             
