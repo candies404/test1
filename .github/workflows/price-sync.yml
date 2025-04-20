@@ -24,6 +24,7 @@ env:
   ONEHUB_ADMIN_TOKEN: ${{ secrets.ONEHUB_ADMIN_TOKEN }}
   JSON_URL: ${{ secrets.JSON_URL }}
   ONEHUB_URL: ${{ secrets.ONEHUB_URL }}
+  TZ: Asia/Shanghai
 
 # 工作流任务
 jobs:
