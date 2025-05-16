@@ -1,93 +1,28 @@
-name: Supabase Database Keepalive
+name: Database Keepalive
 
-# 设置定时执行，可以根据需求调整频率
+# 设置工作流触发条件：每天凌晨 2 点执行
 on:
-  # schedule:
-    # 每天执行一次，时间为UTC 00:00
-    # - cron: '0 0 * * *'
-  # 允许手动触发工作流
-  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'  # 每天凌晨 2 点执行
+  workflow_dispatch:     # 也允许手动触发
 
 jobs:
-  keepalive:
+  database-keepalive:
     runs-on: ubuntu-latest
-    
     steps:
-      # - name: Checkout code
-      #   uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
       
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '18'
       
       - name: Install dependencies
-        run: npm install @supabase/supabase-js
+        run: npm install @supabase/supabase-js dotenv
       
-      - name: Run keepalive script
+      - name: Run database keepalive script
+        run: node database-keepalive.js
         env:
-          # 从GitHub仓库的Secrets中获取数据库配置和查询语句
+          # 从 GitHub secrets 中获取配置信息
           DB_CONFIG: ${{ secrets.DB_CONFIG }}
-        run: |
-          # 创建临时JavaScript文件执行查询
-          cat << 'EOF' > keepalive.js
-          const { createClient } = require('@supabase/supabase-js');
-
-          // 主函数
-          async function main() {
-            try {
-              // 从环境变量获取数据库配置数组
-              const dbConfigArray = JSON.parse(process.env.DB_CONFIG || '[]');
-              
-              if (!Array.isArray(dbConfigArray) || dbConfigArray.length === 0) {
-                console.error('错误: 数据库配置不是有效的数组或为空');
-                process.exit(1);
-              }
-              
-              console.log(`找到 ${dbConfigArray.length} 个数据库配置项需要处理`);
-              
-              // 遍历所有配置项
-              for (let i = 0; i < dbConfigArray.length; i++) {
-                const config = dbConfigArray[i];
-                console.log(`处理数据库配置 #${i + 1}`);
-                
-                // 验证配置项必要参数
-                if (!config.EXPO_PUBLIC_SUPABASE_URL || !config.EXPO_PUBLIC_SUPABASE_ANON_KEY) {
-                  console.error(`配置 #${i + 1} 缺少必要的 URL 或 ANON_KEY`);
-                  continue;
-                }
-                
-                // 获取SQL语句，如果没有提供则使用简单的 SELECT 语句
-                const sqlStatement = config.SQL_statement || 'SELECT NOW();';
-                
-                // 创建 Supabase 客户端
-                const supabaseUrl = config.EXPO_PUBLIC_SUPABASE_URL;
-                const supabaseKey = config.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-                const supabase = createClient(supabaseUrl, supabaseKey);
-                
-                // 执行查询
-                console.log(`正在执行查询: ${sqlStatement}`);
-                const { data, error } = await supabase.rpc('pgstatement', { query: sqlStatement });
-                
-                // 处理结果
-                if (error) {
-                  console.error(`查询错误: ${error.message}`);
-                } else {
-                  console.log('查询成功:', data);
-                }
-              }
-              
-              console.log('所有数据库保活操作已完成');
-              
-            } catch (error) {
-              console.error('发生错误:', error.message);
-              process.exit(1);
-            }
-          }
-
-          // 运行主函数
-          main();
-          EOF
-          
-          # 执行脚本
-          node keepalive.js
