@@ -21,8 +21,9 @@ jobs:
       - name: Install dependencies
         run: npm install @supabase/supabase-js dotenv
       
+      - name: Create config file
+        # 将环境变量写入配置文件，避免 JSON 解析问题
+        run: echo '${{ secrets.DB_CONFIG }}' > db-config.json
+      
       - name: Run database keepalive script
-        run: node database-keepalive.js
-        env:
-          # 从 GitHub secrets 中获取配置信息
-          DB_CONFIG: ${{ secrets.DB_CONFIG }}
+        run: node database-keepalive-file.js
