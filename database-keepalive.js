@@ -1,7 +1,7 @@
 /**
- * 数据库保活脚本
+ * 数据库保活脚本 (Base64 编码版本)
  * 
- * 该脚本通过环境变量读取数据库配置信息，并执行指定的 SQL 查询语句
+ * 该脚本通过环境变量读取 Base64 编码的数据库配置信息，并执行指定的 SQL 查询语句
  * 配置格式为 JSON 数组，每个元素包含 Supabase URL、匿名密钥和要执行的 SQL 语句
  */
 
@@ -10,11 +10,21 @@ const { createClient } = require('@supabase/supabase-js');
 // 主函数
 async function main() {
   try {
-    // 从环境变量获取数据库配置
-    const dbConfigStr = process.env.DB_CONFIG;
+    // 从环境变量获取数据库配置 (Base64 编码)
+    const dbConfigBase64 = process.env.DB_CONFIG_BASE64;
     
-    if (!dbConfigStr) {
-      console.error('错误: 未找到 DB_CONFIG 环境变量');
+    if (!dbConfigBase64) {
+      console.error('错误: 未找到 DB_CONFIG_BASE64 环境变量');
+      process.exit(1);
+    }
+    
+    // 解码 Base64 配置
+    let dbConfigStr;
+    try {
+      dbConfigStr = Buffer.from(dbConfigBase64, 'base64').toString('utf-8');
+      console.log('成功解码 Base64 配置');
+    } catch (decodeErr) {
+      console.error('错误: Base64 解码失败:', decodeErr.message);
       process.exit(1);
     }
     
@@ -23,10 +33,10 @@ async function main() {
     try {
       dbConfigs = JSON.parse(dbConfigStr);
       if (!Array.isArray(dbConfigs)) {
-        throw new Error('DB_CONFIG 必须是一个数组');
+        throw new Error('DB_CONFIG_BASE64 解码后必须是一个数组');
       }
     } catch (err) {
-      console.error('错误: 解析 DB_CONFIG 环境变量失败:', err.message);
+      console.error('错误: 解析配置 JSON 失败:', err.message);
       process.exit(1);
     }
     
