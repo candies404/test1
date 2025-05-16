@@ -1,42 +1,39 @@
 /**
- * 数据库保活脚本 (Base64 编码版本)
+ * 数据库保活脚本 (文件配置版本)
  * 
- * 该脚本通过环境变量读取 Base64 编码的数据库配置信息，并执行指定的 SQL 查询语句
+ * 该脚本通过读取配置文件获取数据库配置信息，并执行指定的 SQL 查询语句
  * 配置格式为 JSON 数组，每个元素包含 Supabase URL、匿名密钥和要执行的 SQL 语句
  */
 
 const { createClient } = require('@supabase/supabase-js');
+const fs = require('fs');
+const path = require('path');
 
 // 主函数
 async function main() {
   try {
-    // 从环境变量获取数据库配置 (Base64 编码)
-    const dbConfigBase64 = process.env.DB_CONFIG_BASE64;
+    // 配置文件路径，默认为当前目录下的 db-config.json
+    const configPath = process.env.CONFIG_PATH || path.join(__dirname, 'db-config.json');
     
-    if (!dbConfigBase64) {
-      console.error('错误: 未找到 DB_CONFIG_BASE64 环境变量');
+    console.log(`正在读取配置文件: ${configPath}`);
+    
+    // 检查文件是否存在
+    if (!fs.existsSync(configPath)) {
+      console.error(`错误: 配置文件不存在: ${configPath}`);
       process.exit(1);
     }
     
-    // 解码 Base64 配置
-    let dbConfigStr;
-    try {
-      dbConfigStr = Buffer.from(dbConfigBase64, 'base64').toString('utf-8');
-      console.log('成功解码 Base64 配置');
-    } catch (decodeErr) {
-      console.error('错误: Base64 解码失败:', decodeErr.message);
-      process.exit(1);
-    }
-    
-    // 解析配置数组
+    // 读取并解析配置文件
     let dbConfigs;
     try {
-      dbConfigs = JSON.parse(dbConfigStr);
+      const fileContent = fs.readFileSync(configPath, 'utf8');
+      dbConfigs = JSON.parse(fileContent);
+      
       if (!Array.isArray(dbConfigs)) {
-        throw new Error('DB_CONFIG_BASE64 解码后必须是一个数组');
+        throw new Error('配置文件必须包含一个数组');
       }
     } catch (err) {
-      console.error('错误: 解析配置 JSON 失败:', err.message);
+      console.error('错误: 读取或解析配置文件失败:', err.message);
       process.exit(1);
     }
     
