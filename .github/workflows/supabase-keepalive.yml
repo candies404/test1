@@ -1,29 +1,32 @@
 name: Database Keepalive
 
-# 设置工作流触发条件：每天凌晨 2 点执行
+# 触发条件：可以通过定时任务触发
 on:
   schedule:
-    - cron: '0 2 * * *'  # 每天凌晨 2 点执行
-  workflow_dispatch:     # 也允许手动触发
+    # 每天执行，可以根据需要调整
+    - cron: '0 0 * * *'
+  # 也可以手动触发
+  workflow_dispatch:
 
 jobs:
   database-keepalive:
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/checkout@v3
+        
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
         with:
           node-version: '18'
-      
+          
       - name: Install dependencies
-        run: npm install @supabase/supabase-js dotenv
-      
-      - name: Create config file
-        # 将环境变量写入配置文件，避免 JSON 解析问题
-        run: echo '${{ secrets.DB_CONFIG }}' > db-config.json
-      
-      - name: Run database keepalive script
-        run: node database-keepalive-file.js
+        run: |
+          npm install pg dotenv
+          
+      - name: Execute database queries
+        env:
+          # 定义数据库连接和查询语句的JSON数组
+          DB_CONNECTIONS: ${{ secrets.DB_CONNECTIONS }}
+        run: node ./db-keepalive.js
