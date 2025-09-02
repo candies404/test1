@@ -1,0 +1,338 @@
+name: 检查仓库更新
+
+# 触发条件
+on:
+  # schedule:
+  #   - cron: '0 0 * * *'  # 每天 UTC 0:00 运行（北京时间 8:00）
+  workflow_dispatch:      # 支持手动触发
+
+# 工作流任务
+jobs:
+  check-updates:
+    name: '检查仓库更新'
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Shanghai    # 添加全局时区设置
+    permissions:
+      issues: write
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 步骤1: 查找或创建用于存储SHA的Issue
+      - name: 查找或创建存储SHA的Issue
+        id: get-issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LABEL="commit-sha-storage"
+          
+          # 检查标签是否存在，不存在则创建
+          label_exists=$(gh api repos/${{ github.repository }}/labels/${LABEL} --jq '.name' 2>/dev/null || echo "")
+          if [ -z "$label_exists" ]; then
+          echo "创建标签 ${LABEL}..."
+          gh api repos/${{ github.repository }}/labels -f name="${LABEL}" -f description="用于标记存储commit SHA的issue" -f color="0366d6"
+          fi
+          
+          # 查找带有该标签的 OPEN Issue（只查找open状态的，避免重复创建）
+          echo "查找带有 ${LABEL} 标签的Issue..."
+          issue_number=$(gh api repos/${{ github.repository }}/issues?labels=${LABEL}&state=open --jq '.[0].number' 2>/dev/null || echo "")
+          
+          if [ -z "$issue_number" ]; then
+          echo "未找到存储Issue，创建新Issue..."
+          issue_response=$(gh api repos/${{ github.repository }}/issues -f title="Commit SHA Storage" -f body="Initial storage" -f labels[]="${LABEL}")
+          issue_number=$(echo "$issue_response" | jq -r '.number')
+          echo "创建的Issue编号: $issue_number"
+          else
+          echo "找到现有Issue编号: $issue_number"
+          fi
+          
+          echo "issue_number=$issue_number" >> $GITHUB_OUTPUT
+          # 步骤2: 读取存储的SHA
+          - name: 读取存储的SHA
+          id: read-shas
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          run: |
+            issue_number=${{ steps.get-issue.outputs.issue_number }}
+            response=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" \
+                      -H "Accept: application/vnd.github.v3+json" \
+                      "https://api.github.com/repos/${{ github.repository }}/issues/${issue_number}")
+          
+            if [ $? -ne 0 ]; then
+              echo "❌ 获取 Issue 内容失败"
+              exit 1
+            fi
+          
+            stored_shas=$(echo "$response" | jq -r '.body // ""')
+          
+            # 验证存储的SHA格式
+            if [ -n "$stored_shas" ]; then
+              # 先清理输入，去除可能的空白字符
+              cleaned_shas=$(echo "$stored_shas" | tr -d '\r' | sed '/^$/d')
+              # 检查每一行是否符合 "仓库:7位SHA" 的格式
+              if echo "$cleaned_shas" | grep -qE '^([^:]+:[a-f0-9]{7})?$'; then
+                echo "✅ SHA格式验证通过"
+              else
+                echo "❌ 存储的SHA格式不正确"
+                echo "当前内容: ${stored_shas}"
+                echo "⚠️ 视为首次运行处理"
+                stored_shas=""
+              fi
+            else
+              echo "⚠️ 存储内容为空，视为首次运行"
+            fi
+            echo "stored_shas<<EOF" >> $GITHUB_OUTPUT
+            echo "$stored_shas" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          # 步骤3: 检查仓库更新状态
+          - name: 检查仓库更新状态
+          id: check-updates
+          env:
+            REPOS: ${{ vars.REPOS }}
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            STORED_SHAS: ${{ steps.read-shas.outputs.stored_shas }}
+          run: |
+            # 初始化变量
+            updates_status="### 🔍 仓库更新检查报告\n\n"
+            updates_status+="### 📅 检查时间: $(date '+%Y-%m-%d %H:%M:%S %Z')\n\n"
+            updates_status+="---\n\n"
+            has_updates=false
+            updated_repos=0
+          
+            # 判断是否是首次运行（stored_shas为空）
+            is_first_run=false
+            if [ -z "${STORED_SHAS}" ] || [ "${STORED_SHAS}" = "null" ]; then
+              is_first_run=true
+              echo "首次运行，将检查24小时内的更新"
+            fi
+            # 初始化新的SHA存储内容
+            new_shas=""
+          
+            # 将环境变量转换为数组并立即计算总数
+            read -ra repos <<< "$REPOS"
+            declare -i total_repos=${#repos[@]}
+          
+            echo "解析到的仓库数量: $total_repos"
+            echo "仓库列表:"
+            for repo in "${repos[@]}"; do
+              echo "- $repo"
+            done
+          
+            echo "开始处理 $total_repos 个仓库..."
+            # 创建变量分别存储不同状态的仓库信息
+            updated_content=""
+            not_updated_content=""
+            error_content=""
+          
+            for repo in "${repos[@]}"; do
+              echo "===================="
+              echo "处理仓库: ${repo}"
+              echo "===================="
+          
+              # 获取仓库信息
+              repo_info=$(curl -s -H "Accept: application/vnd.github.v3+json" \
+                          -H "Authorization: token ${GITHUB_TOKEN}" \
+                          "https://api.github.com/repos/${repo}")
+          
+              # 检查仓库是否存在
+              if [[ $(echo "$repo_info" | jq -r '.message') == "Not Found" ]]; then
+                  echo "❌ 仓库不存在: ${repo}"
+                  error_content+="##### ❌ 仓库：[${repo}](https://github.com/${repo})\n\n"
+                  error_content+="📝 **描述**：*仓库不存在*\n\n"
+                  error_content+="⚠️ **错误**：未找到该仓库，请检查仓库名称是否正确\n\n"
+                  error_content+="---\n\n"
+                  continue
+              fi
+          
+              # 获取最新commit
+              latest_commit=$(curl -s -H "Accept: application/vnd.github.v3+json" \
+                             -H "Authorization: token ${GITHUB_TOKEN}" \
+                             "https://api.github.com/repos/${repo}/commits?per_page=1")
+          
+              # 检查API响应是否包含错误信息
+              if [[ $(echo "$latest_commit" | jq -r 'type') == "object" ]] && [[ $(echo "$latest_commit" | jq -r '.message') ]]; then
+                  if [[ $(echo "$latest_commit" | jq -r '.message') == "Git Repository is empty." ]]; then
+                      echo "⚠️ 仓库为空: ${repo}"
+                      error_content+="##### ⚡ 仓库：[${repo}](https://github.com/${repo})\n\n"
+                      error_content+="📝 **描述**：$(echo "$repo_info" | jq -r '.description // "暂无描述"')\n\n"
+                      error_content+="⚡ **状态**：这是一个空仓库\n\n"
+                      error_content+="---\n\n"
+                      if [ -z "$new_shas" ]; then
+                          new_shas="${repo}:empty"
+                      else
+                          new_shas="${new_shas}\n${repo}:empty"
+                      fi
+                      continue
+                  else
+                      echo "❌ 获取提交信息出错: $(echo "$latest_commit" | jq -r '.message')"
+                      error_content+="##### ❌ 仓库：[${repo}](https://github.com/${repo})\n\n"
+                      error_content+="📝 **描述**：$(echo "$repo_info" | jq -r '.description // "暂无描述"')\n\n"
+                      error_content+="⚠️ **错误**：$(echo "$latest_commit" | jq -r '.message')\n\n"
+                      error_content+="---\n\n"
+                      continue
+                  fi
+              fi
+          
+              # 解析commit信息
+              current_sha=$(echo "$latest_commit" | jq -r '.[0].sha[0:7]')
+              # 获取存储的短SHA
+              stored_sha=$(echo "$STORED_SHAS" | grep -oP "${repo}:\K[a-f0-9]{7}" || echo '')
+              commit_date=$(echo "$latest_commit" | jq -r '.[0].commit.committer.date')
+              commit_msg=$(echo "$latest_commit" | jq -r '.[0].commit.message')
+              description=$(echo "$repo_info" | jq -r '.description // "暂无描述"')
+          
+              echo "当前SHA: $current_sha"
+              echo "存储SHA: $stored_sha"
+              echo "提交时间: $commit_date"
+              echo "仓库描述: $description"
+          
+              # 更新SHA存储字符串
+              if [ -z "$new_shas" ]; then
+                  new_shas="${repo}:${current_sha}"
+              else
+                  new_shas="${new_shas}\n${repo}:${current_sha}"
+              fi
+              current_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              current_timestamp=$(date -u -d "$current_time" +%s)
+              commit_timestamp=$(date -u -d "$commit_date" +%s)
+          
+              # 判断更新状态
+              if [ "$is_first_run" = true ]; then
+                  # 首次运行：检查仓库是否在24小时内有更新
+                  time_diff=$((current_timestamp - commit_timestamp))
+                  if [ $time_diff -le 86400 ]; then  # 86400秒 = 24小时
+                      echo "🎉 ${repo} 24小时内有更新"
+                      has_updates=true
+                      ((updated_repos++)) || true
+                      status_icon="✅"
+                  else
+                      echo "💤 ${repo} 24小时内无更新"
+                      status_icon="❌"
+                  fi
+              else
+                  # 非首次运行：比对短SHA
+                  if [ -n "$stored_sha" ] && [ "$current_sha" = "$stored_sha" ]; then
+                      echo "💤 ${repo} 无更新"
+                      status_icon="❌"
+                  else
+                      echo "🎉 ${repo} 发现更新"
+                      has_updates=true
+                      ((updated_repos++)) || true
+                      status_icon="✅"
+                  fi
+              fi
+              # 计算时间显示
+              time_diff_seconds=$((current_timestamp - commit_timestamp))
+              # 格式化时间显示
+              if [ $time_diff_seconds -lt 60 ]; then
+                  time_status="${time_diff_seconds}秒未更新"
+              elif [ $time_diff_seconds -lt 3600 ]; then
+                  time_diff_mins=$((time_diff_seconds / 60))
+                  time_status="${time_diff_mins}分钟未更新"
+              elif [ $time_diff_seconds -lt 86400 ]; then
+                  time_diff_hours=$((time_diff_seconds / 3600))
+                  time_status="${time_diff_hours}小时未更新"
+              else
+                  time_diff_days=$((time_diff_seconds / 86400))
+                  time_status="${time_diff_days}天未更新"
+              fi
+              # 构建仓库信息
+              repo_info_content="##### ${status_icon} 仓库：[${repo}](https://github.com/${repo})\n\n"
+              repo_info_content+="📝 **描述**：${description}\n\n"
+              repo_info_content+="⏰ **更新时间**：$(date -d "$commit_date" '+%Y-%m-%d %H:%M:%S %Z')\n\n"
+              repo_info_content+="📌 **提交信息**：${commit_msg}\n\n"
+              repo_info_content+="⏳ **状态**：${time_status}\n\n"
+              repo_info_content+="---\n\n"
+              # 根据更新状态添加到对应的内容中
+              if [ "$status_icon" = "✅" ]; then
+                  updated_content+="$repo_info_content"
+              else
+                  not_updated_content+="$repo_info_content"
+              fi
+            done
+            # 计算错误数量
+            error_count=$(echo -e "$error_content" | grep -c "##### ❌" || true)
+            empty_count=$(echo -e "$error_content" | grep -c "##### ⚡" || true)
+          
+            # 构建统计信息
+            stats=$'### 📊 统计信息\n'
+            stats+=$'总仓库数：'${total_repos}$'\n'
+            stats+=$'有更新：'${updated_repos:-0}$'\n'
+            if [ "${error_count:-0}" -gt 0 ] || [ "${empty_count:-0}" -gt 0 ]; then
+              stats+=$'无更新：'$((total_repos - ${updated_repos:-0} - error_count - empty_count))$'\n'
+              if [ "${empty_count:-0}" -gt 0 ]; then
+                stats+=$'空仓库：'${empty_count}$'\n'
+              fi
+              if [ "${error_count:-0}" -gt 0 ]; then
+                stats+=$'错误：'${error_count}$''
+              fi
+            else
+              stats+=$'无更新：'$((total_repos - ${updated_repos:-0}))$''
+            fi
+            stats+=$'\n\n---\n\n'
+          
+            # 合并所有内容
+            if [ "${error_count:-0}" -gt 0 ] || [ "${empty_count:-0}" -gt 0 ]; then
+              final_status="${stats}${error_content}${updated_content}${not_updated_content}"
+            else
+              final_status="${stats}${updated_content}${not_updated_content}"
+            fi
+            echo "所有仓库处理完成"
+            echo "更新的仓库数: ${updated_repos:-0}"
+            # 设置通知标题
+            if [ "${error_count:-0}" -gt 0 ] || [ "${empty_count:-0}" -gt 0 ]; then
+              if [ "${has_updates:-false}" = true ]; then
+                title_status="🔔 仓库有 ${updated_repos:-0} 个更新，${error_count} 个错误，${empty_count} 个空仓库"
+              else
+                title_status="❗ 无更新，但有 ${error_count} 个仓库出错，${empty_count} 个空仓库"
+              fi
+            else
+              if [ "${has_updates:-false}" = true ]; then
+                title_status="🎉 发现 ${updated_repos:-0} 个仓库更新！"
+              else
+                title_status="😴 监控的仓库暂无更新"
+              fi
+            fi
+            # 将结果保存到GitHub Actions输出变量
+            {
+              echo "has_updates=${has_updates:-false}"
+              echo "check_results<<EOF"
+              echo -e "$final_status"
+              echo "EOF"
+              echo "title_status=${title_status}"
+              echo "new_shas=${new_shas}"
+            } >> $GITHUB_OUTPUT
+          # 步骤4: 更新存储的SHA
+          - name: 更新存储的SHA
+          if: success()
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            ISSUE_NUMBER: ${{ steps.get-issue.outputs.issue_number }}
+            NEW_SHAS: ${{ steps.check-updates.outputs.new_shas }}
+          run: |
+            echo "更新Issue #${ISSUE_NUMBER} 中的SHA存储..."
+          
+            # 检查NEW_SHAS是否为空
+            if [ -z "${NEW_SHAS}" ]; then
+              echo "❌ 没有获取到新的SHA信息，跳过更新"
+              exit 1
+            fi
+          
+            # 更新Issue内容
+            if echo -e "${NEW_SHAS}" | gh issue edit "${ISSUE_NUMBER}" --body-file -; then
+              echo "✅ SHA信息更新成功"
+              echo "更新后的SHA信息: ${NEW_SHAS}"
+            else
+              echo "❌ SHA信息更新失败"
+              exit 1
+            fi
+          # 步骤5: 发送通知
+          - name: 发送通知
+          if: steps.check-updates.outputs.has_updates == 'true'
+          uses: candies404/Multi-Channel-Notifier@latest
+          with:
+            title: "${{ steps.check-updates.outputs.title_status }}"
+            content: ${{ steps.check-updates.outputs.check_results }}
+            wpush_key: ${{ secrets.WPUSH_KEY }}
+            hitokoto: 'false'
