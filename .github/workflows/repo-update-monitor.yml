@@ -28,26 +28,37 @@ jobs:
           LABEL="commit-sha-storage"
           
           # 检查标签是否存在，不存在则创建
-          label_exists=$(gh api repos/${{ github.repository }}/labels/${LABEL} --jq '.name' 2>/dev/null || echo "")
-          if [ -z "$label_exists" ]; then
-          echo "创建标签 ${LABEL}..."
-          gh api repos/${{ github.repository }}/labels -f name="${LABEL}" -f description="用于标记存储commit SHA的issue" -f color="0366d6"
+          if ! gh api repos/${{ github.repository }}/labels/${LABEL} --jq '.name' >/dev/null 2>&1; then
+            echo "创建标签 ${LABEL}..."
+            gh api repos/${{ github.repository }}/labels \
+              -f name="${LABEL}" \
+              -f description="用于标记存储commit SHA的issue" \
+              -f color="0366d6"
+          else
+            echo "标签 ${LABEL} 已存在"
           fi
           
-          # 查找带有该标签的 OPEN Issue（只查找open状态的，避免重复创建）
+          # 查找带有该标签的 OPEN Issue
           echo "查找带有 ${LABEL} 标签的Issue..."
-          issue_number=$(gh api repos/${{ github.repository }}/issues?labels=${LABEL}&state=open --jq '.[0].number' 2>/dev/null || echo "")
+          
+          # 使用更可靠的方式查找 Issue
+          issue_response=$(gh api repos/${{ github.repository }}/issues?labels=${LABEL}&state=open 2>/dev/null || echo "[]")
+          issue_number=$(echo "$issue_response" | jq -r 'if length > 0 then .[0].number else empty end')
           
           if [ -z "$issue_number" ]; then
-          echo "未找到存储Issue，创建新Issue..."
-          issue_response=$(gh api repos/${{ github.repository }}/issues -f title="Commit SHA Storage" -f body="Initial storage" -f labels[]="${LABEL}")
-          issue_number=$(echo "$issue_response" | jq -r '.number')
-          echo "创建的Issue编号: $issue_number"
+            echo "未找到存储Issue，创建新Issue..."
+            issue_response=$(gh api repos/${{ github.repository }}/issues \
+              -f title="Commit SHA Storage" \
+              -f body="Initial storage for commit SHAs" \
+              -f labels[]="${LABEL}")
+            issue_number=$(echo "$issue_response" | jq -r '.number')
+            echo "创建的Issue编号: $issue_number"
           else
-          echo "找到现有Issue编号: $issue_number"
+            echo "找到现有Issue编号: $issue_number"
           fi
           
           echo "issue_number=$issue_number" >> $GITHUB_OUTPUT
+          
           # 步骤2: 读取存储的SHA
           - name: 读取存储的SHA
           id: read-shas
